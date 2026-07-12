@@ -1,10 +1,13 @@
+import json
 import time
 import uuid
 
 import httpx
+from pydantic import ValidationError
 
 from app.config import OPENROUTER_BASE_URL
-from app.schemas import ChatMessage, LLMResponse
+from app.prompts import extract_invoice_prompt
+from app.schemas import ChatMessage, InvoiceExtraction, LLMResponse
 
 
 class LLMError(Exception):
@@ -25,6 +28,14 @@ class ModelTimeoutError(LLMError):
 
 class ModelUnavailableError(LLMError):
     pass
+
+
+class ModelStructuredOutputError(LLMError):
+    """Raised when the model response is not valid JSON."""
+
+
+class ModelValidationError(LLMError):
+    """Raised when JSON does not match the expected Pydantic schema."""
 
 
 class OpenRouterClient:
@@ -79,6 +90,37 @@ class OpenRouterClient:
 
         self._raise_for_status(http_response, request_id)
         return self._parse_response(http_response, request_id, latency_ms)
+
+    async def extract_invoice(self, text: str) -> InvoiceExtraction:
+
+        prompt = extract_invoice_prompt(text)
+        result = await self.generate(prompt)
+        return self._parse_invoice_extraction(result.response, result.request_id)
+
+    def _parse_invoice_extraction(
+        self,
+        content: str,
+        request_id: str,
+    ) -> InvoiceExtraction:
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise ModelStructuredOutputError(
+                f"Request {request_id}: Model did not return valid JSON. "
+                f"Raw content: {content!r}"
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise ModelStructuredOutputError(
+                f"Request {request_id}: Expected a JSON object, got {type(data).__name__}."
+            )
+
+        try:
+            return InvoiceExtraction.model_validate(data)
+        except ValidationError as exc:
+            raise ModelValidationError(
+                f"Request {request_id}: Invoice JSON failed validation: {exc}"
+            ) from exc
 
     def _raise_for_status(self, http_response: httpx.Response, request_id: str) -> None:
         status = http_response.status_code
