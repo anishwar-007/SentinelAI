@@ -1,0 +1,17 @@
+[project]
+name = "ai-observability-platform"
+version = "0.1.0"
+description = "Milestone 1: minimal prompt-to-LLM client using OpenRouter"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+]
+
+# uv uses this table to know how to treat the project.
+# We are building an application, not a distributable library,
+# so we tell uv not to try to "build" us as an installable package.
+[tool.uv]
+package = false
