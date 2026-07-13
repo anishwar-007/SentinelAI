@@ -3,8 +3,6 @@ import os
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-load_dotenv()
-
 DEFAULT_MODEL: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
 OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 
@@ -16,8 +14,9 @@ class Settings(BaseModel):
 
 
 def load_settings() -> Settings:
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    load_dotenv()
 
+    api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         raise RuntimeError(
             "OPENROUTER_API_KEY is not set.\n"
@@ -26,4 +25,8 @@ def load_settings() -> Settings:
             "Get a key at https://openrouter.ai/keys"
         )
 
-    return Settings(openrouter_api_key=api_key)
+    return Settings(
+        openrouter_api_key=api_key,
+        model=os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL),
+        base_url=os.getenv("OPENROUTER_BASE_URL", OPENROUTER_BASE_URL),
+    )

@@ -1,30 +1,24 @@
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 
 class ChatMessage(BaseModel):
-    role: str = Field(...)
-    content: str = Field(...)
+    role: Literal["system", "user", "assistant"]
+    content: str
 
 
 class LLMResponse(BaseModel):
-    request_id: str = Field(...)
-    model: str = Field(...)
-    response: str = Field(...)
+    request_id: str
+    model: str
+    response: str
     usage: dict[str, Any] = Field(default_factory=dict)
-    latency_ms: float = Field(...)
+    latency_ms: float
     raw_response: dict[str, Any] = Field(default_factory=dict)
 
 
 class InvoiceExtraction(BaseModel):
-    """Structured invoice fields extracted from free-form text.
-
-    Every key must be present in the model JSON. Use null when a value
-    cannot be determined so callers never guess from missing keys.
-    """
-
     vendor: str | None
     invoice_number: str | None
     amount: float | None

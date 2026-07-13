@@ -1,41 +1,32 @@
-import json
 import time
 import uuid
+from types import TracebackType
 
 import httpx
-from pydantic import ValidationError
 
 from app.config import OPENROUTER_BASE_URL
-from app.prompts import extract_invoice_prompt
-from app.schemas import ChatMessage, InvoiceExtraction, LLMResponse
+from app.errors import (
+    LLMError,
+    ModelAuthenticationError,
+    ModelRateLimitError,
+    ModelStructuredOutputError,
+    ModelTimeoutError,
+    ModelUnavailableError,
+    ModelValidationError,
+)
+from app.schemas import ChatMessage, LLMResponse
+from app.tracing.decorators import trace_span
 
-
-class LLMError(Exception):
-    pass
-
-
-class ModelAuthenticationError(LLMError):
-    pass
-
-
-class ModelRateLimitError(LLMError):
-    pass
-
-
-class ModelTimeoutError(LLMError):
-    pass
-
-
-class ModelUnavailableError(LLMError):
-    pass
-
-
-class ModelStructuredOutputError(LLMError):
-    """Raised when the model response is not valid JSON."""
-
-
-class ModelValidationError(LLMError):
-    """Raised when JSON does not match the expected Pydantic schema."""
+__all__ = [
+    "LLMError",
+    "ModelAuthenticationError",
+    "ModelRateLimitError",
+    "ModelStructuredOutputError",
+    "ModelTimeoutError",
+    "ModelUnavailableError",
+    "ModelValidationError",
+    "OpenRouterClient",
+]
 
 
 class OpenRouterClient:
@@ -50,6 +41,21 @@ class OpenRouterClient:
         self._model = model
         self._base_url = base_url
         self._timeout = timeout
+        self._http = httpx.AsyncClient(timeout=timeout)
+
+    async def aclose(self) -> None:
+        await self._http.aclose()
+
+    async def __aenter__(self) -> "OpenRouterClient":
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        await self.aclose()
 
     def _build_headers(self) -> dict[str, str]:
         return {
@@ -66,6 +72,7 @@ class OpenRouterClient:
             "messages": [user_message.model_dump()],
         }
 
+    @trace_span("llm.generate")
     async def generate(self, prompt: str) -> LLMResponse:
         request_id = str(uuid.uuid4())
         url = f"{self._base_url}/chat/completions"
@@ -75,8 +82,7 @@ class OpenRouterClient:
         start = time.perf_counter()
 
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                http_response = await client.post(url, headers=headers, json=payload)
+            http_response = await self._http.post(url, headers=headers, json=payload)
         except httpx.TimeoutException as exc:
             raise ModelTimeoutError(
                 f"Request {request_id} timed out after {self._timeout}s."
@@ -90,36 +96,6 @@ class OpenRouterClient:
 
         self._raise_for_status(http_response, request_id)
         return self._parse_response(http_response, request_id, latency_ms)
-
-    async def extract_invoice(self, text: str) -> InvoiceExtraction:
-        prompt = extract_invoice_prompt(text)
-        result = await self.generate(prompt)
-        return self._parse_invoice_extraction(result.response, result.request_id)
-
-    def _parse_invoice_extraction(
-        self,
-        content: str,
-        request_id: str,
-    ) -> InvoiceExtraction:
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise ModelStructuredOutputError(
-                f"Request {request_id}: Model did not return valid JSON. "
-                f"Raw content: {content!r}"
-            ) from exc
-
-        if not isinstance(data, dict):
-            raise ModelStructuredOutputError(
-                f"Request {request_id}: Expected a JSON object, got {type(data).__name__}."
-            )
-
-        try:
-            return InvoiceExtraction.model_validate(data)
-        except ValidationError as exc:
-            raise ModelValidationError(
-                f"Request {request_id}: Invoice JSON failed validation: {exc}"
-            ) from exc
 
     def _raise_for_status(self, http_response: httpx.Response, request_id: str) -> None:
         status = http_response.status_code

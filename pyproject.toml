@@ -1,7 +1,7 @@
 [project]
 name = "ai-observability-platform"
 version = "0.1.0"
-description = "Milestone 1: minimal prompt-to-LLM client using OpenRouter"
+description = "AI observability learning project: OpenRouter, structured outputs, planner, tracing"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -10,8 +10,23 @@ dependencies = [
     "python-dotenv>=1.0",
 ]
 
-# uv uses this table to know how to treat the project.
-# We are building an application, not a distributable library,
-# so we tell uv not to try to "build" us as an installable package.
+[dependency-groups]
+dev = [
+    "mypy>=1.11",
+    "ruff>=0.6",
+]
+
 [tool.uv]
 package = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["app"]

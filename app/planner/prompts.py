@@ -4,8 +4,10 @@ def plan_user_query_prompt(user_query: str) -> str:
 Decide which capability should handle the user query.
 
 Capabilities:
-- "chat": general questions, conversation, jokes, explanations, anything that is not invoice extraction
-- "invoice_extraction": the user wants invoice fields extracted from text, or the query itself looks like invoice content
+- "chat": general questions, conversation, jokes, explanations,
+  anything that is not invoice extraction
+- "invoice_extraction": the user wants invoice fields extracted from text,
+  or the query itself looks like invoice content
 
 Return ONLY a single valid JSON object. Do not explain. Do not wrap the JSON
 in markdown fences or any other text.
