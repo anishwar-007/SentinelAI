@@ -2,8 +2,23 @@ import asyncio
 import json
 
 from app.config import load_settings
+from app.executor import Executor
 from app.llm import LLMError, OpenRouterClient
+from app.logger import get_logger, setup_logging
+from app.planner.planner import Planner
+from app.planner.schemas import Plan
 from app.schemas import InvoiceExtraction, LLMResponse
+
+logger = get_logger()
+
+
+def print_plan(plan: Plan) -> None:
+    print("=" * 48)
+    print("PLAN")
+    print(f"INTENT     : {plan.intent}")
+    print(f"CONFIDENCE : {plan.confidence}")
+    print(f"REASONING  : {plan.reasoning}")
+    print("=" * 48)
 
 
 def print_chat_result(result: LLMResponse) -> None:
@@ -23,62 +38,39 @@ def print_invoice_result(invoice: InvoiceExtraction) -> None:
     print("=" * 48)
 
 
-def read_multiline_invoice() -> str:
-
-    print("Paste invoice text, then type END on its own line:")
-    lines: list[str] = []
-    while True:
-        try:
-            line = input()
-        except EOFError:
-            break
-        if line.strip() == "END":
-            break
-        lines.append(line)
-    return "\n".join(lines).strip()
-
-
-async def run_chat(client: OpenRouterClient) -> None:
-    prompt = input("Enter Prompt: ").strip()
-    if not prompt:
-        print("No prompt entered. Exiting.")
-        return
-
-    result = await client.generate(prompt)
-    print_chat_result(result)
-
-
-async def run_extract_invoice(client: OpenRouterClient) -> None:
-    text = read_multiline_invoice()
-    if not text:
-        print("No invoice text entered. Exiting.")
-        return
-
-    invoice = await client.extract_invoice(text)
-    print_invoice_result(invoice)
+def print_result(result: LLMResponse | InvoiceExtraction) -> None:
+    if isinstance(result, InvoiceExtraction):
+        print_invoice_result(result)
+    else:
+        print_chat_result(result)
 
 
 async def main() -> None:
+    setup_logging()
     settings = load_settings()
 
     client = OpenRouterClient(
         api_key=settings.openrouter_api_key,
         model=settings.model,
     )
+    planner = Planner(client)
+    executor = Executor(client)
 
-    print("Choose task")
-    print("1. Chat")
-    print("2. Extract Invoice")
-    choice = input("> ").strip()
+    user_query = input("Enter Query: ").strip()
+    if not user_query:
+        print("No query entered. Exiting.")
+        return
+
+    logger.info("request.start query_chars=%s", len(user_query))
 
     try:
-        if choice == "1":
-            await run_chat(client)
-        elif choice == "2":
-            await run_extract_invoice(client)
-        else:
-            print("Invalid choice. Enter 1 or 2.")
+        plan = await planner.plan(user_query)
+        print_plan(plan)
+        result = await executor.execute(plan, user_query)
+        print_result(result)
+        logger.info("request.success intent=%s", plan.intent)
     except LLMError as exc:
+        logger.error("request.failed error=%s", exc)
         print(f"Error: {exc}")
 
 
