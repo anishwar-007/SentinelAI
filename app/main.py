@@ -4,12 +4,9 @@ import json
 from app.config import load_settings
 from app.executor import Executor
 from app.llm import LLMError, OpenRouterClient
-from app.logger import get_logger, setup_logging
 from app.planner.planner import Planner
 from app.planner.schemas import Plan
 from app.schemas import InvoiceExtraction, LLMResponse
-
-logger = get_logger()
 
 
 def print_plan(plan: Plan) -> None:
@@ -46,7 +43,6 @@ def print_result(result: LLMResponse | InvoiceExtraction) -> None:
 
 
 async def main() -> None:
-    setup_logging()
     settings = load_settings()
 
     client = OpenRouterClient(
@@ -61,16 +57,12 @@ async def main() -> None:
         print("No query entered. Exiting.")
         return
 
-    logger.info("request.start query_chars=%s", len(user_query))
-
     try:
         plan = await planner.plan(user_query)
         print_plan(plan)
         result = await executor.execute(plan, user_query)
         print_result(result)
-        logger.info("request.success intent=%s", plan.intent)
     except LLMError as exc:
-        logger.error("request.failed error=%s", exc)
         print(f"Error: {exc}")
 
 

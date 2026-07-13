@@ -6,11 +6,8 @@ import httpx
 from pydantic import ValidationError
 
 from app.config import OPENROUTER_BASE_URL
-from app.logger import get_logger
 from app.prompts import extract_invoice_prompt
 from app.schemas import ChatMessage, InvoiceExtraction, LLMResponse
-
-logger = get_logger()
 
 
 class LLMError(Exception):
@@ -75,81 +72,29 @@ class OpenRouterClient:
         headers = self._build_headers()
         payload = self._build_payload(prompt)
 
-        logger.info(
-            "model_call.start request_id=%s model=%s prompt_chars=%s",
-            request_id,
-            self._model,
-            len(prompt),
-        )
-
         start = time.perf_counter()
 
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 http_response = await client.post(url, headers=headers, json=payload)
         except httpx.TimeoutException as exc:
-            logger.error(
-                "model_call.timeout request_id=%s model=%s timeout_s=%s",
-                request_id,
-                self._model,
-                self._timeout,
-            )
             raise ModelTimeoutError(
                 f"Request {request_id} timed out after {self._timeout}s."
             ) from exc
         except httpx.RequestError as exc:
-            logger.error(
-                "model_call.network_error request_id=%s model=%s error=%s",
-                request_id,
-                self._model,
-                exc,
-            )
             raise ModelUnavailableError(
                 f"Request {request_id} network error: {exc}"
             ) from exc
 
         latency_ms = (time.perf_counter() - start) * 1000
 
-        try:
-            self._raise_for_status(http_response, request_id)
-            result = self._parse_response(http_response, request_id, latency_ms)
-        except LLMError as exc:
-            logger.error(
-                "model_call.failed request_id=%s model=%s latency_ms=%.1f status=%s error=%s",
-                request_id,
-                self._model,
-                latency_ms,
-                http_response.status_code,
-                exc,
-            )
-            raise
-
-        logger.info(
-            "model_call.success request_id=%s model=%s latency_ms=%.1f usage=%s response_chars=%s",
-            result.request_id,
-            result.model,
-            result.latency_ms,
-            result.usage,
-            len(result.response),
-        )
-        return result
+        self._raise_for_status(http_response, request_id)
+        return self._parse_response(http_response, request_id, latency_ms)
 
     async def extract_invoice(self, text: str) -> InvoiceExtraction:
-        logger.info(
-            "extract_invoice.start text_chars=%s",
-            len(text),
-        )
         prompt = extract_invoice_prompt(text)
         result = await self.generate(prompt)
-        invoice = self._parse_invoice_extraction(result.response, result.request_id)
-        logger.info(
-            "extract_invoice.success request_id=%s vendor=%s invoice_number=%s amount=%s",
-            result.request_id,
-            invoice.vendor,
-            invoice.invoice_number,
-            invoice.amount,
-        )
-        return invoice
+        return self._parse_invoice_extraction(result.response, result.request_id)
 
     def _parse_invoice_extraction(
         self,

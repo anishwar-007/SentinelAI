@@ -7,11 +7,8 @@ from app.llm import (
     ModelValidationError,
     OpenRouterClient,
 )
-from app.logger import get_logger
 from app.planner.prompts import plan_user_query_prompt
 from app.planner.schemas import Plan
-
-logger = get_logger()
 
 
 class Planner:
@@ -20,17 +17,9 @@ class Planner:
         self._client = client
 
     async def plan(self, user_query: str) -> Plan:
-        logger.info("planner.start query_chars=%s", len(user_query))
         prompt = plan_user_query_prompt(user_query)
         result = await self._client.generate(prompt)
-        plan = self._parse_plan(result.response, result.request_id)
-        logger.info(
-            "planner.success request_id=%s intent=%s confidence=%s",
-            result.request_id,
-            plan.intent,
-            plan.confidence,
-        )
-        return plan
+        return self._parse_plan(result.response, result.request_id)
 
     def _parse_plan(self, content: str, request_id: str) -> Plan:
         try:
