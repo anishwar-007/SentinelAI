@@ -1,15 +1,27 @@
 import json
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel
 
 from app.errors import LLMError
 from app.executor import Executor
 from app.planner.planner import Planner
+from app.retriever.registry import DocumentNotFoundError, DocumentRegistry
 from app.retriever.retriever import DocumentRetriever
+from app.retriever.schemas import IndexedDocument
 from app.schemas import InvoiceExtraction, LLMResponse
 from app.tracing.tracer import DEFAULT_TRACES_DIR, Tracer
+
+__all__ = [
+    "AIOrchestrator",
+    "DocumentNotFoundError",
+    "EmptyQueryError",
+    "IndexResult",
+    "RunResult",
+    "TraceNotFoundError",
+]
 
 
 class TraceNotFoundError(LookupError):
@@ -29,10 +41,10 @@ class RunResult(BaseModel):
 
 
 class IndexResult(BaseModel):
-    document_id: str
-    chunks_indexed: int
+    document: IndexedDocument
     trace_id: str
     latency_ms: float
+    deduplicated: bool = False
 
 
 class AIOrchestrator:
@@ -47,6 +59,10 @@ class AIOrchestrator:
         self._executor = executor
         self._retriever = retriever
         self._traces_dir = traces_dir
+
+    @property
+    def registry(self) -> DocumentRegistry:
+        return self._retriever.registry
 
     async def run(self, query: str) -> RunResult:
         cleaned = query.strip()
@@ -78,6 +94,7 @@ class AIOrchestrator:
         content: str,
         document_id: str | None = None,
         *,
+        filename: str | None = None,
         source: str | None = None,
     ) -> IndexResult:
         cleaned = content.strip()
@@ -85,32 +102,39 @@ class AIOrchestrator:
             raise EmptyQueryError("Document content must not be empty.")
 
         tracer = Tracer(output_dir=self._traces_dir)
-        indexed_id = ""
-        chunks_indexed = 0
+        outcome = None
 
         with tracer.trace(
             metadata={
                 "action": "index_document",
                 "document_id": document_id,
+                "filename": filename,
                 "source": source,
             }
         ):
-            indexed_id, chunks_indexed = await self._retriever.index_document(
+            outcome = await self._retriever.index_document(
                 cleaned,
                 document_id=document_id,
+                filename=filename,
                 source=source,
             )
 
         trace = tracer.current_trace
-        if trace is None:
+        if trace is None or outcome is None:
             raise LLMError("Indexing finished without a trace.")
 
         return IndexResult(
-            document_id=indexed_id,
-            chunks_indexed=chunks_indexed,
+            document=outcome.document,
             trace_id=trace.trace_id,
             latency_ms=trace.total_latency_ms or 0.0,
+            deduplicated=outcome.deduplicated,
         )
+
+    def list_documents(self) -> list[IndexedDocument]:
+        return self.registry.list_documents()
+
+    def get_document(self, document_id: str) -> IndexedDocument:
+        return self.registry.get_document(UUID(document_id))
 
     def get_trace(self, trace_id: str) -> dict[str, Any]:
         path = Path(self._traces_dir) / f"{trace_id}.json"

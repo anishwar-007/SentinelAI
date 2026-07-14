@@ -12,6 +12,10 @@ class EmbeddingService:
         self._model_name = model_name
         self._model: SentenceTransformer | None = None
 
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
     def _get_model(self) -> SentenceTransformer:
         if self._model is None:
             self._model = SentenceTransformer(self._model_name)

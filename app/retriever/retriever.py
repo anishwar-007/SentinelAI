@@ -1,8 +1,24 @@
+import hashlib
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
+
 from app.retriever.chunker import chunk_document
 from app.retriever.embeddings import EmbeddingService
-from app.retriever.schemas import RetrieverResult
+from app.retriever.registry import DocumentRegistry
+from app.retriever.schemas import IndexedDocument, RetrieverResult
 from app.retriever.vector_store import VectorStore
 from app.tracing.decorators import trace_span
+
+
+class IndexOutcome:
+    def __init__(
+        self,
+        document: IndexedDocument,
+        *,
+        deduplicated: bool,
+    ) -> None:
+        self.document = document
+        self.deduplicated = deduplicated
 
 
 class DocumentRetriever:
@@ -10,26 +26,76 @@ class DocumentRetriever:
         self,
         embeddings: EmbeddingService | None = None,
         vector_store: VectorStore | None = None,
+        registry: DocumentRegistry | None = None,
         default_top_k: int = 5,
     ) -> None:
         self._embeddings = embeddings or EmbeddingService()
         self._vector_store = vector_store or VectorStore()
+        self._registry = registry or DocumentRegistry()
         self._default_top_k = default_top_k
+
+    @property
+    def registry(self) -> DocumentRegistry:
+        return self._registry
 
     async def index_document(
         self,
         text: str,
         document_id: str | None = None,
         *,
+        filename: str | None = None,
         source: str | None = None,
-    ) -> tuple[str, int]:
-        chunks = chunk_document(text, document_id=document_id, source=source)
-        if not chunks:
+    ) -> IndexOutcome:
+        cleaned = text.strip()
+        if not cleaned:
             raise ValueError("Document text is empty; nothing to index.")
 
-        embeddings = await self._embeddings.embed([chunk.content for chunk in chunks])
-        indexed = self._vector_store.add(chunks, embeddings)
-        return chunks[0].document_id, indexed
+        content_hash = hashlib.sha256(cleaned.encode("utf-8")).hexdigest()
+        duplicate = self._registry.find_by_hash(content_hash)
+        if duplicate is not None:
+            return IndexOutcome(document=duplicate, deduplicated=True)
+
+        doc_uuid = _resolve_document_id(document_id)
+        resolved_filename = filename or source or "untitled.txt"
+        indexed_at = datetime.now(UTC)
+
+        document = IndexedDocument(
+            document_id=doc_uuid,
+            filename=resolved_filename,
+            content_hash=content_hash,
+            indexed_at=indexed_at,
+            chunk_count=0,
+            embedding_model=self._embeddings.model_name,
+            status="indexing",
+            metadata={
+                "source": source,
+            },
+        )
+        self._registry.register_document(document)
+
+        try:
+            chunks = chunk_document(
+                cleaned,
+                document_id=str(doc_uuid),
+                source=source or resolved_filename,
+            )
+            embeddings = await self._embeddings.embed(
+                [chunk.content for chunk in chunks]
+            )
+            indexed = self._vector_store.add(chunks, embeddings)
+            ready = self._registry.update_status(
+                doc_uuid,
+                "ready",
+                chunk_count=indexed,
+            )
+            return IndexOutcome(document=ready, deduplicated=False)
+        except Exception as exc:
+            self._registry.update_status(
+                doc_uuid,
+                "failed",
+                metadata_updates={"error": str(exc)},
+            )
+            raise
 
     async def search(self, query: str, top_k: int | None = None) -> RetrieverResult:
         cleaned = query.strip()
@@ -67,3 +133,14 @@ def inject_context(query: str, retrieval: RetrieverResult) -> str:
         f"Context:\n{context}\n\n"
         f"Question: {query}"
     )
+
+
+def _resolve_document_id(document_id: str | None) -> UUID:
+    if document_id is None or not document_id.strip():
+        return uuid4()
+    try:
+        return UUID(document_id)
+    except ValueError as exc:
+        raise ValueError(
+            f"document_id must be a valid UUID, got: {document_id!r}"
+        ) from exc

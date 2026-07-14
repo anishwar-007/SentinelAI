@@ -1,4 +1,5 @@
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter
 
@@ -6,10 +7,12 @@ from app.api.deps import OrchestratorDep
 from app.api.schemas import (
     DocumentIndexRequest,
     DocumentIndexResponse,
+    DocumentListResponse,
     HealthResponse,
     QueryRequest,
     QueryResponse,
 )
+from app.retriever.schemas import IndexedDocument
 
 router = APIRouter()
 
@@ -42,14 +45,34 @@ async def index_document(
     result = await orchestrator.index_document(
         body.content,
         document_id=body.document_id,
+        filename=body.filename,
         source=body.source,
     )
+    document = result.document
     return DocumentIndexResponse(
-        document_id=result.document_id,
-        chunks_indexed=result.chunks_indexed,
+        document_id=str(document.document_id),
+        filename=document.filename,
+        chunks_indexed=document.chunk_count,
+        status=document.status,
+        deduplicated=result.deduplicated,
         trace_id=result.trace_id,
         latency_ms=result.latency_ms,
+        content_hash=document.content_hash,
+        embedding_model=document.embedding_model,
     )
+
+
+@router.get("/documents", response_model=DocumentListResponse)
+async def list_documents(orchestrator: OrchestratorDep) -> DocumentListResponse:
+    return DocumentListResponse(documents=orchestrator.list_documents())
+
+
+@router.get("/documents/{document_id}", response_model=IndexedDocument)
+async def get_document(
+    document_id: UUID,
+    orchestrator: OrchestratorDep,
+) -> IndexedDocument:
+    return orchestrator.get_document(str(document_id))
 
 
 @router.get("/trace/{trace_id}")

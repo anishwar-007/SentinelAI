@@ -9,3 +9,4 @@ venv/
 .DS_Store
 traces/
 chroma_data/
+registry/documents.json

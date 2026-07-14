@@ -3,6 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.errors import LLMError
+from app.retriever.registry import DocumentNotFoundError
 from app.services.orchestrator import EmptyQueryError, TraceNotFoundError
 
 
@@ -20,6 +21,20 @@ def register_exception_handlers(app: FastAPI) -> None:
         exc: TraceNotFoundError,
     ) -> JSONResponse:
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(DocumentNotFoundError)
+    async def document_not_found_handler(
+        _request: Request,
+        exc: DocumentNotFoundError,
+    ) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(ValueError)
+    async def value_error_handler(
+        _request: Request,
+        exc: ValueError,
+    ) -> JSONResponse:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
 
     @app.exception_handler(RequestValidationError)
     async def validation_handler(
