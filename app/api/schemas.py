@@ -17,3 +17,16 @@ class QueryResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+
+
+class DocumentIndexRequest(BaseModel):
+    content: str = Field(..., min_length=1)
+    document_id: str | None = None
+    source: str | None = None
+
+
+class DocumentIndexResponse(BaseModel):
+    document_id: str
+    chunks_indexed: int
+    trace_id: str
+    latency_ms: float

@@ -10,6 +10,9 @@ from app.executor import Executor
 from app.invoice import InvoiceExtractor
 from app.llm import OpenRouterClient
 from app.planner.planner import Planner
+from app.retriever.embeddings import EmbeddingService
+from app.retriever.retriever import DocumentRetriever
+from app.retriever.vector_store import VectorStore
 from app.services.orchestrator import AIOrchestrator
 
 
@@ -21,11 +24,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         model=settings.model,
         base_url=settings.base_url,
     )
+    embeddings = EmbeddingService()
+    vector_store = VectorStore()
+    retriever = DocumentRetriever(embeddings=embeddings, vector_store=vector_store)
     planner = Planner(client)
-    executor = Executor(client, InvoiceExtractor(client))
-    orchestrator = AIOrchestrator(planner=planner, executor=executor)
+    executor = Executor(
+        client,
+        InvoiceExtractor(client),
+        retriever=retriever,
+    )
+    orchestrator = AIOrchestrator(
+        planner=planner,
+        executor=executor,
+        retriever=retriever,
+    )
 
     app.state.client = client
+    app.state.retriever = retriever
     app.state.orchestrator = orchestrator
 
     try:
@@ -37,7 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="TracerAI",
     description="AI observability learning platform",
-    version="0.5.0",
+    version="0.6.0",
     lifespan=lifespan,
 )
 

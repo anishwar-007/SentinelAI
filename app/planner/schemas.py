@@ -4,7 +4,6 @@ from pydantic import BaseModel, Field
 
 
 class Plan(BaseModel):
-
-    intent: Literal["chat", "invoice_extraction"]
+    intent: Literal["chat", "invoice_extraction", "retrieval"]
     confidence: float = Field(..., ge=0.0, le=1.0)
     reasoning: str

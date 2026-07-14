@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from app.errors import LLMError
 from app.executor import Executor
 from app.planner.planner import Planner
+from app.retriever.retriever import DocumentRetriever
 from app.schemas import InvoiceExtraction, LLMResponse
 from app.tracing.tracer import DEFAULT_TRACES_DIR, Tracer
 
@@ -27,15 +28,24 @@ class RunResult(BaseModel):
     latency_ms: float
 
 
+class IndexResult(BaseModel):
+    document_id: str
+    chunks_indexed: int
+    trace_id: str
+    latency_ms: float
+
+
 class AIOrchestrator:
     def __init__(
         self,
         planner: Planner,
         executor: Executor,
+        retriever: DocumentRetriever,
         traces_dir: str = DEFAULT_TRACES_DIR,
     ) -> None:
         self._planner = planner
         self._executor = executor
+        self._retriever = retriever
         self._traces_dir = traces_dir
 
     async def run(self, query: str) -> RunResult:
@@ -60,6 +70,45 @@ class AIOrchestrator:
             intent=plan.intent,
             confidence=plan.confidence,
             result=self._serialize_result(result),
+            latency_ms=trace.total_latency_ms or 0.0,
+        )
+
+    async def index_document(
+        self,
+        content: str,
+        document_id: str | None = None,
+        *,
+        source: str | None = None,
+    ) -> IndexResult:
+        cleaned = content.strip()
+        if not cleaned:
+            raise EmptyQueryError("Document content must not be empty.")
+
+        tracer = Tracer(output_dir=self._traces_dir)
+        indexed_id = ""
+        chunks_indexed = 0
+
+        with tracer.trace(
+            metadata={
+                "action": "index_document",
+                "document_id": document_id,
+                "source": source,
+            }
+        ):
+            indexed_id, chunks_indexed = await self._retriever.index_document(
+                cleaned,
+                document_id=document_id,
+                source=source,
+            )
+
+        trace = tracer.current_trace
+        if trace is None:
+            raise LLMError("Indexing finished without a trace.")
+
+        return IndexResult(
+            document_id=indexed_id,
+            chunks_indexed=chunks_indexed,
+            trace_id=trace.trace_id,
             latency_ms=trace.total_latency_ms or 0.0,
         )
 
