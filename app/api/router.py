@@ -36,6 +36,7 @@ async def query(
         latency_ms=result.latency_ms,
         verification=result.verification,
         verification_status=result.verification_status,
+        analysis=result.analysis,
     )
 
 

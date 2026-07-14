@@ -2,6 +2,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.analysis.schemas import RootCauseAnalysis
 from app.retriever.schemas import IndexedDocument
 from app.verifier.schemas import VerificationResult
 
@@ -18,6 +19,7 @@ class QueryResponse(BaseModel):
     latency_ms: float
     verification: VerificationResult | None = None
     verification_status: Literal["ok", "unknown"] = "ok"
+    analysis: RootCauseAnalysis | None = None
 
 
 class HealthResponse(BaseModel):

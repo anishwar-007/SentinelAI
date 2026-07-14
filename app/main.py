@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.analysis.analyzer import RootCauseAnalyzer
 from app.api.errors import register_exception_handlers
 from app.api.router import router
 from app.config import load_settings
@@ -41,11 +42,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         retriever=retriever,
     )
     verifier = Verifier(client)
+    analyzer = RootCauseAnalyzer(client)
     orchestrator = AIOrchestrator(
         planner=planner,
         executor=executor,
         retriever=retriever,
         verifier=verifier,
+        analyzer=analyzer,
     )
 
     app.state.client = client
@@ -61,7 +64,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="TracerAI",
     description="AI observability learning platform",
-    version="0.7.0",
+    version="0.8.0",
     lifespan=lifespan,
 )
 

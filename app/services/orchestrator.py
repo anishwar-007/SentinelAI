@@ -5,13 +5,17 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.analysis.analyzer import RootCauseAnalyzer, unknown_analysis
+from app.analysis.schemas import RootCauseAnalysis
 from app.errors import LLMError
 from app.executor import Executor
 from app.planner.planner import Planner
+from app.planner.schemas import Plan
 from app.retriever.registry import DocumentNotFoundError, DocumentRegistry
 from app.retriever.retriever import DocumentRetriever
 from app.retriever.schemas import IndexedDocument
 from app.schemas import InvoiceExtraction, LLMResponse
+from app.tracing.schemas import Trace
 from app.tracing.tracer import DEFAULT_TRACES_DIR, Tracer
 from app.verifier.schemas import VerificationResult
 from app.verifier.verifier import Verifier
@@ -44,6 +48,7 @@ class RunResult(BaseModel):
     latency_ms: float
     verification: VerificationResult | None = None
     verification_status: VerificationStatus = "ok"
+    analysis: RootCauseAnalysis | None = None
 
 
 class IndexResult(BaseModel):
@@ -60,12 +65,14 @@ class AIOrchestrator:
         executor: Executor,
         retriever: DocumentRetriever,
         verifier: Verifier,
+        analyzer: RootCauseAnalyzer,
         traces_dir: str = DEFAULT_TRACES_DIR,
     ) -> None:
         self._planner = planner
         self._executor = executor
         self._retriever = retriever
         self._verifier = verifier
+        self._analyzer = analyzer
         self._traces_dir = traces_dir
 
     @property
@@ -82,6 +89,7 @@ class AIOrchestrator:
         output: LLMResponse | InvoiceExtraction | None = None
         verification: VerificationResult | None = None
         verification_status: VerificationStatus = "ok"
+        analysis: RootCauseAnalysis | None = None
 
         with tracer.trace(metadata={"query": cleaned}):
             plan = await self._planner.plan(cleaned)
@@ -91,6 +99,14 @@ class AIOrchestrator:
                 query=cleaned,
                 output=output,
                 retrieved_context=execution.retrieved_context,
+            )
+            analysis = await self._analyze_execution(
+                query=cleaned,
+                plan=plan,
+                output=output,
+                retrieved_context=execution.retrieved_context,
+                verification=verification,
+                trace=tracer.current_trace,
             )
 
         trace = tracer.current_trace
@@ -105,6 +121,7 @@ class AIOrchestrator:
             latency_ms=trace.total_latency_ms or 0.0,
             verification=verification,
             verification_status=verification_status,
+            analysis=analysis,
         )
 
     async def _verify_execution(
@@ -126,6 +143,37 @@ class AIOrchestrator:
             return result, "ok"
         except Exception:
             return None, "unknown"
+
+    async def _analyze_execution(
+        self,
+        *,
+        query: str,
+        plan: Plan,
+        output: LLMResponse | InvoiceExtraction,
+        retrieved_context: str | None,
+        verification: VerificationResult | None,
+        trace: Trace | None,
+    ) -> RootCauseAnalysis:
+        if trace is None:
+            return unknown_analysis("No active trace available for analysis.")
+
+        answer = (
+            output.response
+            if isinstance(output, LLMResponse)
+            else json.dumps(output.model_dump(mode="json"))
+        )
+
+        try:
+            return await self._analyzer.analyze(
+                query=query,
+                plan=plan,
+                retrieved_context=retrieved_context,
+                answer=answer,
+                verification=verification,
+                trace=trace,
+            )
+        except Exception as exc:
+            return unknown_analysis(f"Analyzer failed: {exc}")
 
     async def index_document(
         self,
