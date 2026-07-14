@@ -1,5 +1,10 @@
 from app.retriever.registry import DocumentNotFoundError, DocumentRegistry
-from app.retriever.retriever import DocumentRetriever, IndexOutcome, inject_context
+from app.retriever.retriever import (
+    DocumentRetriever,
+    IndexOutcome,
+    format_retrieved_context,
+    inject_context,
+)
 from app.retriever.schemas import (
     DocumentChunk,
     IndexedDocument,
@@ -16,5 +21,6 @@ __all__ = [
     "IndexedDocument",
     "RetrieverResult",
     "SearchResult",
+    "format_retrieved_context",
     "inject_context",
 ]

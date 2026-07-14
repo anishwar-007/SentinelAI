@@ -110,12 +110,26 @@ class DocumentRetriever:
 
 @trace_span("retrieval.context_injection")
 def inject_context(query: str, retrieval: RetrieverResult) -> str:
-    if not retrieval.results:
+    context = format_retrieved_context(retrieval)
+    if not context:
         return (
             "Answer the question using general knowledge. "
             "No retrieved document context was available.\n\n"
             f"Question: {query}"
         )
+
+    return (
+        "Use the retrieved context to answer the question. "
+        "If the context is insufficient, say what is missing. "
+        "Do not invent facts that are not supported by the context.\n\n"
+        f"Context:\n{context}\n\n"
+        f"Question: {query}"
+    )
+
+
+def format_retrieved_context(retrieval: RetrieverResult) -> str:
+    if not retrieval.results:
+        return ""
 
     blocks: list[str] = []
     for index, item in enumerate(retrieval.results, start=1):
@@ -124,15 +138,7 @@ def inject_context(query: str, retrieval: RetrieverResult) -> str:
             f"[Chunk {index} | source={source} | score={item.score:.3f}]\n"
             f"{item.chunk.content}"
         )
-
-    context = "\n\n".join(blocks)
-    return (
-        "Use the retrieved context to answer the question. "
-        "If the context is insufficient, say what is missing. "
-        "Do not invent facts that are not supported by the context.\n\n"
-        f"Context:\n{context}\n\n"
-        f"Question: {query}"
-    )
+    return "\n\n".join(blocks)
 
 
 def _resolve_document_id(document_id: str | None) -> UUID:

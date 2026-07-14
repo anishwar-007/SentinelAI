@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -13,6 +13,8 @@ from app.retriever.retriever import DocumentRetriever
 from app.retriever.schemas import IndexedDocument
 from app.schemas import InvoiceExtraction, LLMResponse
 from app.tracing.tracer import DEFAULT_TRACES_DIR, Tracer
+from app.verifier.schemas import VerificationResult
+from app.verifier.verifier import Verifier
 
 __all__ = [
     "AIOrchestrator",
@@ -22,6 +24,8 @@ __all__ = [
     "RunResult",
     "TraceNotFoundError",
 ]
+
+VerificationStatus = Literal["ok", "unknown"]
 
 
 class TraceNotFoundError(LookupError):
@@ -38,6 +42,8 @@ class RunResult(BaseModel):
     confidence: float
     result: Any
     latency_ms: float
+    verification: VerificationResult | None = None
+    verification_status: VerificationStatus = "ok"
 
 
 class IndexResult(BaseModel):
@@ -53,11 +59,13 @@ class AIOrchestrator:
         planner: Planner,
         executor: Executor,
         retriever: DocumentRetriever,
+        verifier: Verifier,
         traces_dir: str = DEFAULT_TRACES_DIR,
     ) -> None:
         self._planner = planner
         self._executor = executor
         self._retriever = retriever
+        self._verifier = verifier
         self._traces_dir = traces_dir
 
     @property
@@ -71,23 +79,53 @@ class AIOrchestrator:
 
         tracer = Tracer(output_dir=self._traces_dir)
         plan = None
-        result: LLMResponse | InvoiceExtraction | None = None
+        output: LLMResponse | InvoiceExtraction | None = None
+        verification: VerificationResult | None = None
+        verification_status: VerificationStatus = "ok"
 
         with tracer.trace(metadata={"query": cleaned}):
             plan = await self._planner.plan(cleaned)
-            result = await self._executor.execute(plan, cleaned)
+            execution = await self._executor.execute(plan, cleaned)
+            output = execution.output
+            verification, verification_status = await self._verify_execution(
+                query=cleaned,
+                output=output,
+                retrieved_context=execution.retrieved_context,
+            )
 
         trace = tracer.current_trace
-        if trace is None or plan is None or result is None:
+        if trace is None or plan is None or output is None:
             raise LLMError("Orchestrator finished without a trace or result.")
 
         return RunResult(
             trace_id=trace.trace_id,
             intent=plan.intent,
             confidence=plan.confidence,
-            result=self._serialize_result(result),
+            result=self._serialize_result(output),
             latency_ms=trace.total_latency_ms or 0.0,
+            verification=verification,
+            verification_status=verification_status,
         )
+
+    async def _verify_execution(
+        self,
+        *,
+        query: str,
+        output: LLMResponse | InvoiceExtraction,
+        retrieved_context: str | None,
+    ) -> tuple[VerificationResult | None, VerificationStatus]:
+        if not isinstance(output, LLMResponse):
+            return None, "ok"
+
+        try:
+            result = await self._verifier.verify(
+                query=query,
+                context=retrieved_context or "",
+                answer=output.response,
+            )
+            return result, "ok"
+        except Exception:
+            return None, "unknown"
 
     async def index_document(
         self,

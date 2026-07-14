@@ -1,8 +1,9 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from app.retriever.schemas import IndexedDocument
+from app.verifier.schemas import VerificationResult
 
 
 class QueryRequest(BaseModel):
@@ -15,6 +16,8 @@ class QueryResponse(BaseModel):
     confidence: float
     result: Any
     latency_ms: float
+    verification: VerificationResult | None = None
+    verification_status: Literal["ok", "unknown"] = "ok"
 
 
 class HealthResponse(BaseModel):

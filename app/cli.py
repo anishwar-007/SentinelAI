@@ -77,8 +77,8 @@ async def main() -> None:
             try:
                 plan = await planner.plan(user_query)
                 print_plan(plan)
-                result = await executor.execute(plan, user_query)
-                print_result(result)
+                execution = await executor.execute(plan, user_query)
+                print_result(execution.output)
             except LLMError as exc:
                 print(f"Error: {exc}")
 

@@ -15,6 +15,7 @@ from app.retriever.registry import DocumentRegistry
 from app.retriever.retriever import DocumentRetriever
 from app.retriever.vector_store import VectorStore
 from app.services.orchestrator import AIOrchestrator
+from app.verifier.verifier import Verifier
 
 
 @asynccontextmanager
@@ -39,10 +40,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         InvoiceExtractor(client),
         retriever=retriever,
     )
+    verifier = Verifier(client)
     orchestrator = AIOrchestrator(
         planner=planner,
         executor=executor,
         retriever=retriever,
+        verifier=verifier,
     )
 
     app.state.client = client
@@ -58,7 +61,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="TracerAI",
     description="AI observability learning platform",
-    version="0.6.1",
+    version="0.7.0",
     lifespan=lifespan,
 )
 
