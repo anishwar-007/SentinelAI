@@ -1,0 +1,23 @@
+Invoice INV-2026-0042
+
+Vendor: Northwind Supplies Pvt Ltd
+Vendor address: 14 Industrial Estate, Pune, MH 411001
+Buyer: TracerAI Labs
+Buyer address: 88 Market Street, Bengaluru, KA 560001
+
+Invoice date: 2026-07-01
+Due date: 2026-07-15
+Currency: INR
+
+Line items:
+1. Managed Postgres usage - quantity 1 - unit price 12000 - amount 12000
+2. Vector search cluster - quantity 1 - unit price 8500 - amount 8500
+3. Object storage overage - quantity 40 GB - unit price 12 - amount 480
+
+Subtotal: 20980
+Tax GST 18 percent: 3776.40
+Total due: 24756.40
+
+Payment terms: Net 15
+Bank account: HDFC 50200011223344
+Notes: Please reference INV-2026-0042 on the transfer.

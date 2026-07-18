@@ -7,7 +7,9 @@ venv/
 .vscode/
 .idea/
 .DS_Store
-traces/
-chroma_data/
-registry/documents.json
-storage/
+/traces/
+/chroma_data/
+/registry/documents.json
+/storage/
+/dist/
+*.egg-info/

@@ -1,1 +1,1 @@
-"""AI observability platform - Milestone 1 package."""
+"""Deprecated compatibility package for one release."""

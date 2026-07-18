@@ -1,0 +1,9 @@
+TracerAI production on-call runbook
+
+If the /query endpoint returns elevated 5xx rates, first check OpenRouter status and recent LLMError traces. Free-tier models frequently return HTTP 200 bodies without choices when rate limited or when a provider is overloaded.
+
+If retrieval answers look empty or hallucinated, verify Qdrant connectivity, confirm the documents collection exists, and check that document status is ready in Postgres. Re-index a sample document if chunk_count is zero.
+
+If document uploads fail, confirm STORAGE_BACKEND. For local mode ensure the storage directory is writable. For supabase mode verify SUPABASE_URL, SUPABASE_KEY, and SUPABASE_BUCKET.
+
+Database connectivity issues against Neon usually appear as asyncpg SSL or DNS errors. Confirm DATABASE_URL uses the pooler host and that alembic upgrade head has been applied.
