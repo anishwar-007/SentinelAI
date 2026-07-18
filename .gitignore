@@ -10,3 +10,4 @@ venv/
 traces/
 chroma_data/
 registry/documents.json
+storage/

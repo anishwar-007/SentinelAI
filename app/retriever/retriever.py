@@ -1,13 +1,27 @@
 import hashlib
 from datetime import UTC, datetime
+from typing import Protocol
 from uuid import UUID, uuid4
 
 from app.retriever.chunker import chunk_document
 from app.retriever.embeddings import EmbeddingService
 from app.retriever.registry import DocumentRegistry
-from app.retriever.schemas import IndexedDocument, RetrieverResult
-from app.retriever.vector_store import VectorStore
+from app.retriever.schemas import DocumentChunk, IndexedDocument, RetrieverResult, SearchResult
 from app.tracing.decorators import trace_span
+
+
+class SupportsVectorStore(Protocol):
+    def add(
+        self,
+        chunks: list[DocumentChunk],
+        embeddings: list[list[float]],
+    ) -> int: ...
+
+    def search(
+        self,
+        query_embedding: list[float],
+        top_k: int = 5,
+    ) -> list[SearchResult]: ...
 
 
 class IndexOutcome:
@@ -24,14 +38,14 @@ class IndexOutcome:
 class DocumentRetriever:
     def __init__(
         self,
-        embeddings: EmbeddingService | None = None,
-        vector_store: VectorStore | None = None,
-        registry: DocumentRegistry | None = None,
+        embeddings: EmbeddingService,
+        vector_store: SupportsVectorStore,
+        registry: DocumentRegistry,
         default_top_k: int = 5,
     ) -> None:
-        self._embeddings = embeddings or EmbeddingService()
-        self._vector_store = vector_store or VectorStore()
-        self._registry = registry or DocumentRegistry()
+        self._embeddings = embeddings
+        self._vector_store = vector_store
+        self._registry = registry
         self._default_top_k = default_top_k
 
     @property
@@ -51,7 +65,7 @@ class DocumentRetriever:
             raise ValueError("Document text is empty; nothing to index.")
 
         content_hash = hashlib.sha256(cleaned.encode("utf-8")).hexdigest()
-        duplicate = self._registry.find_by_hash(content_hash)
+        duplicate = await self._registry.find_by_hash(content_hash)
         if duplicate is not None:
             return IndexOutcome(document=duplicate, deduplicated=True)
 
@@ -71,7 +85,10 @@ class DocumentRetriever:
                 "source": source,
             },
         )
-        self._registry.register_document(document)
+        await self._registry.register_document(
+            document,
+            content=cleaned.encode("utf-8"),
+        )
 
         try:
             chunks = chunk_document(
@@ -83,14 +100,25 @@ class DocumentRetriever:
                 [chunk.content for chunk in chunks]
             )
             indexed = self._vector_store.add(chunks, embeddings)
-            ready = self._registry.update_status(
+            await self._registry.save_chunks(
+                doc_uuid,
+                [
+                    (
+                        chunk.id,
+                        int(chunk.metadata.get("chunk_index", index)),
+                        dict(chunk.metadata),
+                    )
+                    for index, chunk in enumerate(chunks)
+                ],
+            )
+            ready = await self._registry.update_status(
                 doc_uuid,
                 "ready",
                 chunk_count=indexed,
             )
             return IndexOutcome(document=ready, deduplicated=False)
         except Exception as exc:
-            self._registry.update_status(
+            await self._registry.update_status(
                 doc_uuid,
                 "failed",
                 metadata_updates={"error": str(exc)},

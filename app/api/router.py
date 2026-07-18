@@ -67,7 +67,7 @@ async def index_document(
 
 @router.get("/documents", response_model=DocumentListResponse)
 async def list_documents(orchestrator: OrchestratorDep) -> DocumentListResponse:
-    return DocumentListResponse(documents=orchestrator.list_documents())
+    return DocumentListResponse(documents=await orchestrator.list_documents())
 
 
 @router.get("/documents/{document_id}", response_model=IndexedDocument)
@@ -75,9 +75,9 @@ async def get_document(
     document_id: UUID,
     orchestrator: OrchestratorDep,
 ) -> IndexedDocument:
-    return orchestrator.get_document(str(document_id))
+    return await orchestrator.get_document(str(document_id))
 
 
 @router.get("/trace/{trace_id}")
 async def get_trace(trace_id: str, orchestrator: OrchestratorDep) -> dict[str, Any]:
-    return orchestrator.get_trace(trace_id)
+    return await orchestrator.get_trace(trace_id)

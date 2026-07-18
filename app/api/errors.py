@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -5,6 +7,8 @@ from fastapi.responses import JSONResponse
 from app.errors import LLMError
 from app.retriever.registry import DocumentNotFoundError
 from app.services.orchestrator import EmptyQueryError, TraceNotFoundError
+
+logger = logging.getLogger("tracerai.api")
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -49,19 +53,24 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(LLMError)
     async def llm_error_handler(
         _request: Request,
-        _exc: LLMError,
+        exc: LLMError,
     ) -> JSONResponse:
+        logger.exception("LLM request failed: %s", exc)
         return JSONResponse(
             status_code=500,
-            content={"detail": "The AI service failed to process the request."},
+            content={
+                "detail": "The AI service failed to process the request.",
+                "error": str(exc),
+            },
         )
 
     @app.exception_handler(Exception)
     async def unhandled_error_handler(
         _request: Request,
-        _exc: Exception,
+        exc: Exception,
     ) -> JSONResponse:
+        logger.exception("Unhandled error: %s", exc)
         return JSONResponse(
             status_code=500,
-            content={"detail": "Internal server error."},
+            content={"detail": "Internal server error.", "error": str(exc)},
         )

@@ -46,13 +46,12 @@ def print_result(result: LLMResponse | InvoiceExtraction) -> None:
         print_chat_result(result)
 
 
-def print_trace_summary(trace: Trace, saved_path: str) -> None:
+def print_trace_summary(trace: Trace) -> None:
     print("=" * 48)
     print("TRACE")
     print(f"TRACE ID       : {trace.trace_id}")
     print(f"TOTAL LATENCY  : {trace.total_latency_ms:.0f}ms")
     print(f"SPANS          : {len(trace.spans)}")
-    print(f"SAVED          : {saved_path}")
     print("=" * 48)
 
 
@@ -82,8 +81,8 @@ async def main() -> None:
             except LLMError as exc:
                 print(f"Error: {exc}")
 
-        if tracer.current_trace is not None and tracer.saved_path is not None:
-            print_trace_summary(tracer.current_trace, str(tracer.saved_path))
+        if tracer.current_trace is not None:
+            print_trace_summary(tracer.current_trace)
 
 
 if __name__ == "__main__":

@@ -1,12 +1,14 @@
 import json
-from pathlib import Path
+import logging
+from datetime import UTC, datetime
 from typing import Any, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel
 
 from app.analysis.analyzer import RootCauseAnalyzer, unknown_analysis
 from app.analysis.schemas import RootCauseAnalysis
+from app.db.repositories.execution_repository import ExecutionRecord, ExecutionRepository
 from app.errors import LLMError
 from app.executor import Executor
 from app.planner.planner import Planner
@@ -15,8 +17,9 @@ from app.retriever.registry import DocumentNotFoundError, DocumentRegistry
 from app.retriever.retriever import DocumentRetriever
 from app.retriever.schemas import IndexedDocument
 from app.schemas import InvoiceExtraction, LLMResponse
+from app.tracing.persistence import TracePersister
 from app.tracing.schemas import Trace
-from app.tracing.tracer import DEFAULT_TRACES_DIR, Tracer
+from app.tracing.tracer import Tracer
 from app.verifier.schemas import VerificationResult
 from app.verifier.verifier import Verifier
 
@@ -30,6 +33,7 @@ __all__ = [
 ]
 
 VerificationStatus = Literal["ok", "unknown"]
+logger = logging.getLogger("tracerai.orchestrator")
 
 
 class TraceNotFoundError(LookupError):
@@ -66,14 +70,16 @@ class AIOrchestrator:
         retriever: DocumentRetriever,
         verifier: Verifier,
         analyzer: RootCauseAnalyzer,
-        traces_dir: str = DEFAULT_TRACES_DIR,
+        executions: ExecutionRepository,
+        trace_persister: TracePersister,
     ) -> None:
         self._planner = planner
         self._executor = executor
         self._retriever = retriever
         self._verifier = verifier
         self._analyzer = analyzer
-        self._traces_dir = traces_dir
+        self._executions = executions
+        self._trace_persister = trace_persister
 
     @property
     def registry(self) -> DocumentRegistry:
@@ -84,32 +90,72 @@ class AIOrchestrator:
         if not cleaned:
             raise EmptyQueryError("Query must not be empty.")
 
-        tracer = Tracer(output_dir=self._traces_dir)
+        execution_id = uuid4()
+        now = datetime.now(UTC)
+        await self._executions.create(
+            ExecutionRecord(
+                id=execution_id,
+                query=cleaned,
+                intent=None,
+                status="running",
+                latency_ms=None,
+                created_at=now,
+                completed_at=None,
+            )
+        )
+
+        tracer = Tracer()
         plan = None
         output: LLMResponse | InvoiceExtraction | None = None
         verification: VerificationResult | None = None
         verification_status: VerificationStatus = "ok"
         analysis: RootCauseAnalysis | None = None
+        status = "completed"
+        trace: Trace | None = None
 
-        with tracer.trace(metadata={"query": cleaned}):
-            plan = await self._planner.plan(cleaned)
-            execution = await self._executor.execute(plan, cleaned)
-            output = execution.output
-            verification, verification_status = await self._verify_execution(
-                query=cleaned,
-                output=output,
-                retrieved_context=execution.retrieved_context,
-            )
-            analysis = await self._analyze_execution(
-                query=cleaned,
-                plan=plan,
-                output=output,
-                retrieved_context=execution.retrieved_context,
-                verification=verification,
-                trace=tracer.current_trace,
+        try:
+            with tracer.trace(
+                metadata={"query": cleaned, "execution_id": str(execution_id)}
+            ):
+                plan = await self._planner.plan(cleaned)
+                execution = await self._executor.execute(plan, cleaned)
+                output = execution.output
+                verification, verification_status = await self._verify_execution(
+                    query=cleaned,
+                    output=output,
+                    retrieved_context=execution.retrieved_context,
+                )
+                analysis = await self._analyze_execution(
+                    query=cleaned,
+                    plan=plan,
+                    output=output,
+                    retrieved_context=execution.retrieved_context,
+                    verification=verification,
+                    trace=tracer.current_trace,
+                )
+        except Exception:
+            status = "failed"
+            raise
+        finally:
+            trace = tracer.current_trace
+            if trace is not None:
+                try:
+                    await self._trace_persister.persist(trace, execution_id)
+                except Exception:
+                    logger.exception("Failed to persist trace %s", trace.trace_id)
+
+            await self._executions.update(
+                ExecutionRecord(
+                    id=execution_id,
+                    query=cleaned,
+                    intent=plan.intent if plan is not None else None,
+                    status=status,
+                    latency_ms=trace.total_latency_ms if trace is not None else None,
+                    created_at=now,
+                    completed_at=datetime.now(UTC),
+                )
             )
 
-        trace = tracer.current_trace
         if trace is None or plan is None or output is None:
             raise LLMError("Orchestrator finished without a trace or result.")
 
@@ -187,25 +233,64 @@ class AIOrchestrator:
         if not cleaned:
             raise EmptyQueryError("Document content must not be empty.")
 
-        tracer = Tracer(output_dir=self._traces_dir)
-        outcome = None
+        execution_id = uuid4()
+        now = datetime.now(UTC)
+        await self._executions.create(
+            ExecutionRecord(
+                id=execution_id,
+                query=f"index_document:{filename or source or 'untitled.txt'}",
+                intent="document_index",
+                status="running",
+                latency_ms=None,
+                created_at=now,
+                completed_at=None,
+            )
+        )
 
-        with tracer.trace(
-            metadata={
-                "action": "index_document",
-                "document_id": document_id,
-                "filename": filename,
-                "source": source,
-            }
-        ):
-            outcome = await self._retriever.index_document(
-                cleaned,
-                document_id=document_id,
-                filename=filename,
-                source=source,
+        tracer = Tracer()
+        outcome = None
+        status = "completed"
+        trace: Trace | None = None
+
+        try:
+            with tracer.trace(
+                metadata={
+                    "action": "index_document",
+                    "execution_id": str(execution_id),
+                    "document_id": document_id,
+                    "filename": filename,
+                    "source": source,
+                }
+            ):
+                outcome = await self._retriever.index_document(
+                    cleaned,
+                    document_id=document_id,
+                    filename=filename,
+                    source=source,
+                )
+        except Exception:
+            status = "failed"
+            raise
+        finally:
+            trace = tracer.current_trace
+            if trace is not None:
+                try:
+                    await self._trace_persister.persist(trace, execution_id)
+                except Exception:
+                    logger.exception("Failed to persist trace %s", trace.trace_id)
+
+            await self._executions.update(
+                ExecutionRecord(
+                    id=execution_id,
+                    query=f"index_document:{filename or source or 'untitled.txt'}",
+                    intent="document_index",
+                    status=status,
+                    latency_ms=trace.total_latency_ms if trace is not None else None,
+                    created_at=now,
+                    completed_at=datetime.now(UTC),
+                )
             )
 
-        trace = tracer.current_trace
         if trace is None or outcome is None:
             raise LLMError("Indexing finished without a trace.")
 
@@ -216,20 +301,17 @@ class AIOrchestrator:
             deduplicated=outcome.deduplicated,
         )
 
-    def list_documents(self) -> list[IndexedDocument]:
-        return self.registry.list_documents()
+    async def list_documents(self) -> list[IndexedDocument]:
+        return await self.registry.list_documents()
 
-    def get_document(self, document_id: str) -> IndexedDocument:
-        return self.registry.get_document(UUID(document_id))
+    async def get_document(self, document_id: str) -> IndexedDocument:
+        return await self.registry.get_document(UUID(document_id))
 
-    def get_trace(self, trace_id: str) -> dict[str, Any]:
-        path = Path(self._traces_dir) / f"{trace_id}.json"
-        if not path.is_file():
-            raise TraceNotFoundError(f"Trace not found: {trace_id}")
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            raise LLMError(f"Trace file is corrupt: {trace_id}")
-        return data
+    async def get_trace(self, trace_id: str) -> dict[str, object]:
+        try:
+            return await self._trace_persister.load(UUID(trace_id))
+        except (ValueError, FileNotFoundError) as exc:
+            raise TraceNotFoundError(f"Trace not found: {trace_id}") from exc
 
     @staticmethod
     def _serialize_result(result: LLMResponse | InvoiceExtraction) -> Any:

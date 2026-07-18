@@ -1,16 +1,20 @@
 [project]
 name = "ai-observability-platform"
-version = "0.1.0"
+version = "0.8.5"
 description = "AI observability learning project: OpenRouter, structured outputs, planner, tracing"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "chromadb>=0.5",
+    "alembic>=1.13",
+    "asyncpg>=0.29",
     "fastapi>=0.115",
     "httpx>=0.27",
     "pydantic>=2.7",
     "python-dotenv>=1.0",
+    "qdrant-client>=1.11",
     "sentence-transformers>=3.0",
+    "sqlalchemy[asyncio]>=2.0",
+    "supabase>=2.0",
     "uvicorn[standard]>=0.32",
 ]
 
@@ -26,6 +30,7 @@ package = false
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+exclude = ["app/db/migrations"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -37,9 +42,13 @@ packages = ["app"]
 
 [[tool.mypy.overrides]]
 module = [
-    "chromadb",
-    "chromadb.*",
+    "qdrant_client",
+    "qdrant_client.*",
     "sentence_transformers",
     "sentence_transformers.*",
+    "supabase",
+    "supabase.*",
+    "storage3",
+    "storage3.*",
 ]
 ignore_missing_imports = true

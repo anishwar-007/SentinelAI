@@ -1,3 +1,4 @@
+from app.retriever.qdrant_store import QdrantVectorStore
 from app.retriever.registry import DocumentNotFoundError, DocumentRegistry
 from app.retriever.retriever import (
     DocumentRetriever,
@@ -19,6 +20,7 @@ __all__ = [
     "DocumentRetriever",
     "IndexOutcome",
     "IndexedDocument",
+    "QdrantVectorStore",
     "RetrieverResult",
     "SearchResult",
     "format_retrieved_context",

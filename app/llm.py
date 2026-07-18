@@ -35,7 +35,7 @@ class OpenRouterClient:
         api_key: str,
         model: str,
         base_url: str = OPENROUTER_BASE_URL,
-        timeout: float = 30.0,
+        timeout: float = 120.0,
     ) -> None:
         self._api_key = api_key
         self._model = model
@@ -127,11 +127,41 @@ class OpenRouterClient:
     ) -> LLMResponse:
         try:
             data = http_response.json()
-            content = data["choices"][0]["message"]["content"]
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
+        except ValueError as exc:
             raise LLMError(
-                f"Request {request_id}: Could not parse response: {exc}"
+                f"Request {request_id}: Response was not valid JSON."
             ) from exc
+
+        # OpenRouter free models often return HTTP 200 with an error object
+        # and no choices (rate limit, provider overload, etc.).
+        if isinstance(data, dict) and "error" in data and "choices" not in data:
+            error = data["error"]
+            if isinstance(error, dict):
+                message = str(error.get("message") or error)
+                code = error.get("code")
+            else:
+                message = str(error)
+                code = None
+            detail = f"Request {request_id}: Upstream model error"
+            if code is not None:
+                detail += f" ({code})"
+            detail += f": {message}"
+            if code in {429, "429"} or "rate" in message.lower():
+                raise ModelRateLimitError(detail)
+            raise ModelUnavailableError(detail)
+
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LLMError(
+                f"Request {request_id}: Could not parse response "
+                f"(missing choices): {data!r}"
+            ) from exc
+
+        if not isinstance(content, str):
+            raise LLMError(
+                f"Request {request_id}: Model returned non-text content: {content!r}"
+            )
 
         return LLMResponse(
             request_id=request_id,

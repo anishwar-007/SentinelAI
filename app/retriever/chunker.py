@@ -12,11 +12,6 @@ def chunk_document(
     *,
     source: str | None = None,
 ) -> list[DocumentChunk]:
-    """Split text into paragraph-oriented chunks with metadata.
-
-    Paragraph boundaries preserve semantic units better than fixed character
-    windows: related sentences stay together, which improves retrieval quality.
-    """
     cleaned = text.strip()
     if not cleaned:
         return []
@@ -38,7 +33,7 @@ def chunk_document(
 
         chunks.append(
             DocumentChunk(
-                id=f"{doc_id}:{index}",
+                id=str(uuid.uuid4()),
                 document_id=doc_id,
                 content=paragraph,
                 metadata=metadata,

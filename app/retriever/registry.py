@@ -1,12 +1,16 @@
-import json
-from pathlib import Path
-from typing import Any, Literal
-from uuid import UUID
+from datetime import UTC, datetime
+from typing import Any, Literal, cast
+from uuid import UUID, uuid4
 
+from app.db.repositories.document_repository import (
+    DocumentChunkRecord,
+    DocumentRecord,
+    DocumentRepository,
+)
 from app.retriever.schemas import IndexedDocument
+from app.storage.provider import StorageProvider
 from app.tracing.decorators import trace_span
 
-DEFAULT_REGISTRY_PATH = "registry/documents.json"
 DocumentStatus = Literal["indexing", "ready", "failed"]
 
 
@@ -15,47 +19,63 @@ class DocumentNotFoundError(LookupError):
 
 
 class DocumentRegistry:
-    def __init__(self, path: str = DEFAULT_REGISTRY_PATH) -> None:
-        self._path = Path(path)
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        if not self._path.exists():
-            self._write({})
+    """Application catalog over DocumentRepository + object storage."""
 
-    def _read(self) -> dict[str, IndexedDocument]:
-        raw = json.loads(self._path.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            return {}
-        return {
-            key: IndexedDocument.model_validate(value)
-            for key, value in raw.items()
-        }
-
-    def _write(self, documents: dict[str, IndexedDocument]) -> None:
-        payload = {
-            key: document.model_dump(mode="json")
-            for key, document in documents.items()
-        }
-        self._path.write_text(
-            json.dumps(payload, indent=2),
-            encoding="utf-8",
-        )
-
-    @trace_span("registry.register_document")
-    def register_document(self, document: IndexedDocument) -> IndexedDocument:
-        documents = self._read()
-        documents[str(document.document_id)] = document
-        self._write(documents)
-        return document
+    def __init__(
+        self,
+        documents: DocumentRepository,
+        storage: StorageProvider,
+    ) -> None:
+        self._documents = documents
+        self._storage = storage
 
     @trace_span("registry.duplicate_check")
-    def find_by_hash(self, content_hash: str) -> IndexedDocument | None:
-        for document in self._read().values():
-            if document.content_hash == content_hash and document.status == "ready":
-                return document
-        return None
+    async def find_by_hash(self, content_hash: str) -> IndexedDocument | None:
+        record = await self._documents.find_by_hash(content_hash)
+        if record is None:
+            return None
+        return _to_indexed(record)
+
+    @trace_span("registry.register_document")
+    async def register_document(
+        self,
+        document: IndexedDocument,
+        *,
+        content: bytes | None = None,
+    ) -> IndexedDocument:
+        storage_path = document.metadata.get("storage_path")
+        if not isinstance(storage_path, str) or not storage_path:
+            storage_path = f"documents/{document.document_id}/{document.filename}"
+
+        if content is not None:
+            await self._storage.upload(
+                storage_path,
+                content,
+                content_type="text/plain",
+            )
+
+        now = datetime.now(UTC)
+        record = DocumentRecord(
+            id=document.document_id,
+            filename=document.filename,
+            storage_path=storage_path,
+            sha256=document.content_hash,
+            embedding_model=document.embedding_model,
+            chunk_count=document.chunk_count,
+            status=document.status,
+            version=1,
+            metadata={
+                **document.metadata,
+                "storage_path": storage_path,
+            },
+            created_at=document.indexed_at or now,
+            updated_at=now,
+        )
+        created = await self._documents.create(record)
+        return _to_indexed(created)
 
     @trace_span("registry.update_status")
-    def update_status(
+    async def update_status(
         self,
         document_id: UUID,
         status: DocumentStatus,
@@ -63,40 +83,75 @@ class DocumentRegistry:
         chunk_count: int | None = None,
         metadata_updates: dict[str, Any] | None = None,
     ) -> IndexedDocument:
-        documents = self._read()
-        key = str(document_id)
-        document = documents.get(key)
-        if document is None:
+        record = await self._documents.get(document_id)
+        if record is None:
             raise DocumentNotFoundError(f"Document not found: {document_id}")
 
-        updates: dict[str, Any] = {"status": status}
-        if chunk_count is not None:
-            updates["chunk_count"] = chunk_count
+        metadata = dict(record.metadata)
         if metadata_updates:
-            merged = dict(document.metadata)
-            merged.update(metadata_updates)
-            updates["metadata"] = merged
+            metadata.update(metadata_updates)
 
-        updated = document.model_copy(update=updates)
-        documents[key] = updated
-        self._write(documents)
-        return updated
+        updated = DocumentRecord(
+            id=record.id,
+            filename=record.filename,
+            storage_path=record.storage_path,
+            sha256=record.sha256,
+            embedding_model=record.embedding_model,
+            chunk_count=record.chunk_count if chunk_count is None else chunk_count,
+            status=status,
+            version=record.version,
+            metadata=metadata,
+            created_at=record.created_at,
+            updated_at=datetime.now(UTC),
+        )
+        saved = await self._documents.update(updated)
+        return _to_indexed(saved)
 
-    def get_document(self, document_id: UUID) -> IndexedDocument:
-        document = self._read().get(str(document_id))
-        if document is None:
+    async def get_document(self, document_id: UUID) -> IndexedDocument:
+        record = await self._documents.get(document_id)
+        if record is None:
             raise DocumentNotFoundError(f"Document not found: {document_id}")
-        return document
+        return _to_indexed(record)
 
-    def list_documents(self) -> list[IndexedDocument]:
-        documents = list(self._read().values())
-        documents.sort(key=lambda item: item.indexed_at, reverse=True)
-        return documents
+    async def list_documents(self) -> list[IndexedDocument]:
+        records = await self._documents.list()
+        return [_to_indexed(record) for record in records]
 
-    def remove_document(self, document_id: UUID) -> None:
-        documents = self._read()
-        key = str(document_id)
-        if key not in documents:
+    async def remove_document(self, document_id: UUID) -> None:
+        record = await self._documents.get(document_id)
+        if record is None:
             raise DocumentNotFoundError(f"Document not found: {document_id}")
-        del documents[key]
-        self._write(documents)
+        if record.storage_path:
+            await self._storage.delete(record.storage_path)
+        await self._documents.delete(document_id)
+
+    async def save_chunks(
+        self,
+        document_id: UUID,
+        chunks: list[tuple[str, int, dict[str, Any]]],
+    ) -> int:
+        records = [
+            DocumentChunkRecord(
+                id=uuid4(),
+                document_id=document_id,
+                chunk_index=chunk_index,
+                vector_id=vector_id,
+                metadata=metadata,
+            )
+            for vector_id, chunk_index, metadata in chunks
+        ]
+        return await self._documents.add_chunks(records)
+
+
+def _to_indexed(record: DocumentRecord) -> IndexedDocument:
+    status = cast(Literal["indexing", "ready", "failed"], record.status)
+    return IndexedDocument(
+        document_id=record.id,
+        filename=record.filename,
+        content_hash=record.sha256,
+        indexed_at=record.created_at,
+        chunk_count=record.chunk_count,
+        embedding_model=record.embedding_model,
+        status=status,
+        metadata=record.metadata,
+    )

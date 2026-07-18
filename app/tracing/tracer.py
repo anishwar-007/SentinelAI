@@ -2,29 +2,25 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from app.tracing.context import TraceContext
 from app.tracing.schemas import Span, SpanStatus, Trace
 
-DEFAULT_TRACES_DIR: str = "traces"
-
 
 class Tracer:
-    def __init__(self, output_dir: str = DEFAULT_TRACES_DIR) -> None:
-        self._output_dir = Path(output_dir)
+    """Collect an in-memory trace.
+
+    Durable persistence belongs to TracePersister and its StorageProvider.
+    """
+
+    def __init__(self) -> None:
         self._trace: Trace | None = None
-        self._saved_path: Path | None = None
         self._context_token: Any = None
 
     @property
     def current_trace(self) -> Trace | None:
         return self._trace
-
-    @property
-    def saved_path(self) -> Path | None:
-        return self._saved_path
 
     def start_trace(self, metadata: dict[str, Any] | None = None) -> Trace:
         self._trace = Trace(
@@ -32,7 +28,6 @@ class Tracer:
             started_at=datetime.now(UTC),
             metadata=metadata or {},
         )
-        self._saved_path = None
         self._context_token = TraceContext.set_tracer(self)
         return self._trace
 
@@ -43,8 +38,6 @@ class Tracer:
         self._trace.ended_at = datetime.now(UTC)
         elapsed = self._trace.ended_at - self._trace.started_at
         self._trace.total_latency_ms = elapsed.total_seconds() * 1000
-        self._saved_path = self.save()
-
         if self._context_token is not None:
             TraceContext.reset_tracer(self._context_token)
             self._context_token = None
@@ -102,12 +95,3 @@ class Tracer:
             raise RuntimeError("No active trace to serialize.")
         return self._trace.model_dump(mode="json")
 
-    def save(self) -> Path:
-        if self._trace is None:
-            raise RuntimeError("No active trace to save.")
-
-        self._output_dir.mkdir(parents=True, exist_ok=True)
-        path = self._output_dir / f"{self._trace.trace_id}.json"
-        path.write_text(self._trace.model_dump_json(indent=2), encoding="utf-8")
-        self._saved_path = path
-        return path
