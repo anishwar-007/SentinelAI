@@ -57,20 +57,19 @@ at all.
 Customer integrations therefore use:
 
 1. `configure(...)` once at the composition root;
-2. `@observe_execution(...)` around an execution boundary;
-3. `@observe(..., capture=...)` around stages that contribute snapshot state.
+2. `@execution(...)` around an execution boundary;
+3. `@span(...)` around operations; stage state is inferred by the SDK.
 
-Internally, `observe_execution` uses `ExecutionContext` to:
+Internally, `execution()` uses a private lifecycle engine to:
 
 1. collect execution and trace telemetry;
-2. create an immutable `ExecutionSnapshot`;
-3. publish lifecycle, trace, span, verification, analysis, and terminal
-   events through `ExecutionEventPublisher`.
+2. publish lifecycle, trace, span, verification, analysis, and terminal
+   events through the Execution Stream;
+3. leave Execution Views such as `ExecutionSnapshot` to Platform projections.
 
 It does not call repository or storage methods. Customers should never
-construct `ExecutionContext` or call `mark_*`, `set_stage`, `publish_started`,
-`publish_terminal`, or `persist`. Those APIs remain only as compatibility
-surfaces for this major version.
+construct `ExecutionContext`, return `ObservedResult`, call `record_metadata`,
+or use repository/persistence APIs from business code.
 
 ## Product boundaries
 
@@ -78,14 +77,15 @@ surfaces for this major version.
 
 Active telemetry path:
 
-- `sdk`: configure-once settings, `observe_execution`, and optional metadata
-  envelopes;
-- `contracts`: runtime-agnostic execution/trace DTOs;
+- `sdk`: configure-once settings, `execution()`, `span()`, ambient correlation;
+- `contracts`: language-neutral Execution Protocol DTOs for Python;
 - `execution`: internal lifecycle engine and active-execution ContextVar;
 - `tracing`: span instrumentation and in-process trace collection;
 - `execution_stream`: immutable events, publication contracts, and in-memory
   asynchronous fan-out;
 - `plugins`: instrumentation plugin protocol.
+
+The language-neutral protocol specification lives in `protocol/`.
 
 The active telemetry path depends only on Pydantic and the Python standard
 library. It has no Platform, FastAPI, SQLAlchemy, Supabase, Qdrant, dashboard,

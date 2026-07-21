@@ -5,7 +5,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
 from examples.reference_runtime.retriever.schemas import DocumentChunk, SearchResult
-from sentinelai import observe
+from sentinelai import span
 
 DEFAULT_COLLECTION = "documents"
 
@@ -37,7 +37,7 @@ class QdrantVectorStore:
             ),
         )
 
-    @observe("vector_store.add")
+    @span("vector_store.add")
     def add(
         self,
         chunks: list[DocumentChunk],
@@ -75,7 +75,7 @@ class QdrantVectorStore:
         self._client.upsert(collection_name=self._collection_name, points=points)
         return len(points)
 
-    @observe("vector_store.search")
+    @span("vector_store.search")
     def search(
         self,
         query_embedding: list[float],

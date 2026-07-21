@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sentinelai.contracts import ExecutionRecord, ExecutionSnapshot
+from sentinelai.contracts import ExecutionSnapshot
 from sentinelai.execution_stream import (
     ExecutionCancelled,
     ExecutionCompleted,
@@ -11,10 +11,11 @@ from sentinelai.execution_stream import (
     ExecutionFailed,
     ExecutionStarted,
 )
-from sentinelai.repositories.execution_lifecycle_repository import (
+from sentinelai_platform.projections import ExecutionRecord
+from sentinelai_platform.repositories.execution import (
     ExecutionLifecycleRepository,
+    ExecutionSnapshotRepository,
 )
-from sentinelai.repositories.execution_repository import ExecutionRepository
 
 
 class ExecutionStartedSubscriber:
@@ -24,7 +25,7 @@ class ExecutionStartedSubscriber:
     async def handle(self, event: ExecutionEvent) -> None:
         if not isinstance(event, ExecutionStarted):
             return
-        payload = event.payload
+        payload = event.payload_dict()
         await self._executions.create(
             ExecutionRecord(
                 id=event.execution_id,
@@ -42,7 +43,7 @@ class ExecutionCompletedSubscriber:
     def __init__(
         self,
         executions: ExecutionLifecycleRepository,
-        snapshots: ExecutionRepository,
+        snapshots: ExecutionSnapshotRepository,
     ) -> None:
         self._executions = executions
         self._snapshots = snapshots
@@ -62,7 +63,7 @@ class ExecutionFailedSubscriber:
     def __init__(
         self,
         executions: ExecutionLifecycleRepository,
-        snapshots: ExecutionRepository,
+        snapshots: ExecutionSnapshotRepository,
     ) -> None:
         self._executions = executions
         self._snapshots = snapshots
@@ -80,7 +81,7 @@ class ExecutionCancelledSubscriber:
     def __init__(
         self,
         executions: ExecutionLifecycleRepository,
-        snapshots: ExecutionRepository,
+        snapshots: ExecutionSnapshotRepository,
     ) -> None:
         self._executions = executions
         self._snapshots = snapshots
@@ -96,12 +97,37 @@ class ExecutionCancelledSubscriber:
 
 async def _save_snapshot_if_present(
     event: ExecutionEvent,
-    snapshots: ExecutionRepository,
+    snapshots: ExecutionSnapshotRepository,
 ) -> None:
-    raw_snapshot = event.payload.get("snapshot")
-    if raw_snapshot is None:
+    payload = event.payload_dict()
+    raw_snapshot = payload.get("snapshot")
+    if raw_snapshot is not None:
+        await snapshots.save(ExecutionSnapshot.model_validate(raw_snapshot))
         return
-    await snapshots.save(ExecutionSnapshot.model_validate(raw_snapshot))
+    if payload.get("project_snapshot") is not True:
+        return
+
+    await snapshots.save(
+        ExecutionSnapshot.model_validate(
+            {
+                "execution_id": event.execution_id,
+                "query": payload.get("query"),
+                "plan": payload.get("plan"),
+                "retrieval_result": payload.get("retrieval_result"),
+                "response": payload.get("response"),
+                "verification": payload.get("verification"),
+                "analysis": payload.get("analysis"),
+                "trace_id": payload.get("trace_id"),
+                "model_info": payload.get("model_info"),
+                "prompt_references": payload.get("prompt_references", {}),
+                "created_at": payload.get("created_at"),
+                "metadata": event.metadata_dict(),
+                "repository_version": payload.get("repository_version", "1.0"),
+                "execution_status": payload.get("status"),
+                "intent": payload.get("intent"),
+            }
+        )
+    )
 
 
 async def _update_execution(
@@ -110,7 +136,7 @@ async def _update_execution(
     *,
     status: str,
 ) -> None:
-    payload = event.payload
+    payload = event.payload_dict()
     await executions.update(
         ExecutionRecord(
             id=event.execution_id,

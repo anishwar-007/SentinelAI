@@ -12,14 +12,16 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from sentinelai.contracts import (
-    CURRENT_REPOSITORY_VERSION,
     ExecutionSnapshot,
     ExecutionStatus,
     ModelInfo,
     PromptReference,
-    SnapshotCreationMetrics,
     TerminalExecutionStatus,
     Trace,
+)
+from sentinelai.contracts.execution import (
+    CURRENT_REPOSITORY_VERSION,
+    SnapshotCreationMetrics,
 )
 from sentinelai.execution_stream import (
     AnalysisCompleted,
@@ -152,6 +154,7 @@ class ExecutionContext(BaseModel):
         publisher: ExecutionEventPublisher,
         *,
         include_snapshot: bool = True,
+        project_snapshot: bool | None = None,
     ) -> tuple[ExecutionSnapshot | None, SnapshotCreationMetrics]:
         """Publish all completed telemetry and the terminal execution fact."""
         serialization_started = time.perf_counter()
@@ -159,7 +162,12 @@ class ExecutionContext(BaseModel):
         serialized = snapshot.model_dump_json() if snapshot is not None else "{}"
         serialization_latency_ms = (time.perf_counter() - serialization_started) * 1000
 
-        events = self._terminal_events(snapshot)
+        events = self._terminal_events(
+            snapshot,
+            project_snapshot=(
+                include_snapshot if project_snapshot is None else project_snapshot
+            ),
+        )
         publication_started = time.perf_counter()
         for event in events:
             await publisher.publish(event)
@@ -188,6 +196,8 @@ class ExecutionContext(BaseModel):
     def _terminal_events(
         self,
         snapshot: ExecutionSnapshot | None,
+        *,
+        project_snapshot: bool = True,
     ) -> list[ExecutionEvent]:
         events: list[ExecutionEvent] = []
         if self.trace is not None:
@@ -272,6 +282,19 @@ class ExecutionContext(BaseModel):
             ),
             "created_at": self.created_at,
             "completed_at": datetime.now(UTC),
+            "project_snapshot": project_snapshot,
+            "plan": _to_jsonable(self.plan),
+            "retrieval_result": _to_jsonable(self.retrieval_result),
+            "response": _to_jsonable(self.response),
+            "verification": _to_jsonable(self.verification),
+            "analysis": _to_jsonable(self.analysis),
+            "trace_id": self.trace.trace_id if self.trace is not None else None,
+            "model_info": self.model_info.model_dump(mode="json"),
+            "prompt_references": {
+                key: value.model_dump(mode="json")
+                for key, value in self.prompt_references.items()
+            },
+            "repository_version": self.repository_version,
         }
         if snapshot is not None:
             terminal_payload["snapshot"] = snapshot.model_dump(mode="json")

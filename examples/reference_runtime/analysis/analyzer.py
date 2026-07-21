@@ -1,21 +1,21 @@
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from examples.reference_runtime.analysis.prompts import root_cause_analysis_prompt
 from examples.reference_runtime.analysis.schemas import ComponentConfidence, RootCauseAnalysis
-from examples.reference_runtime.llm import OpenRouterClient
+from examples.reference_runtime.llm import LLMClient
 from examples.reference_runtime.planner.schemas import Plan
 from examples.reference_runtime.structured import parse_structured
 from examples.reference_runtime.verifier.schemas import VerificationResult
-from sentinelai import observe
-from sentinelai.contracts import Trace
+from sentinelai import span
 
 
 class RootCauseAnalyzer:
-    def __init__(self, client: OpenRouterClient) -> None:
+    def __init__(self, client: LLMClient) -> None:
         self._client = client
 
-    @observe("root_cause_analysis", capture="analysis", prompt_keys="analyzer")
+    @span("root_cause_analysis")
     async def analyze(
         self,
         *,
@@ -24,7 +24,7 @@ class RootCauseAnalyzer:
         retrieved_context: str | None,
         answer: str,
         verification: VerificationResult | None,
-        trace: Trace,
+        trace_snapshot: Mapping[str, Any] | None = None,
     ) -> RootCauseAnalysis:
         prompt = root_cause_analysis_prompt(
             query=query,
@@ -32,9 +32,9 @@ class RootCauseAnalyzer:
             retrieved_context=retrieved_context or "",
             answer=answer,
             verification_json=_dump_optional(verification),
-            trace_json=json.dumps(_trace_snapshot(trace), indent=2),
+            trace_json=json.dumps(_trace_snapshot(trace_snapshot), indent=2),
         )
-        result = await self._client.generate(prompt)
+        result = await self._client.generate(prompt, json_mode=True)
         analysis = parse_structured(
             result.response,
             RootCauseAnalysis,
@@ -80,20 +80,25 @@ def _dump_optional(value: VerificationResult | None) -> str:
     return value.model_dump_json()
 
 
-def _trace_snapshot(trace: Trace) -> dict[str, Any]:
+def _trace_snapshot(trace: Mapping[str, Any] | None) -> dict[str, Any]:
+    if trace is None:
+        return {}
+    spans = trace.get("spans")
+    span_items = spans if isinstance(spans, list) else []
     return {
-        "trace_id": trace.trace_id,
-        "metadata": trace.metadata,
+        "trace_id": trace.get("trace_id"),
+        "metadata": trace.get("metadata", {}),
         "spans": [
             {
-                "name": span.name,
-                "status": span.status,
-                "latency_ms": span.latency_ms,
-                "model": span.model,
-                "tokens": span.tokens,
-                "error": span.error,
-                "parent_span_id": span.parent_span_id,
+                "name": item.get("name"),
+                "status": item.get("status"),
+                "latency_ms": item.get("latency_ms"),
+                "model": item.get("model"),
+                "tokens": item.get("tokens"),
+                "error": item.get("error"),
+                "parent_span_id": item.get("parent_span_id"),
             }
-            for span in trace.spans
+            for item in span_items
+            if isinstance(item, dict)
         ],
     }

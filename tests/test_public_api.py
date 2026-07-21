@@ -2,31 +2,42 @@ from __future__ import annotations
 
 import sentinelai
 from sentinelai import (
-    ExecutionContext,
-    ExecutionMetadata,
-    ExecutionRepository,
-    ExecutionSnapshot,
-    ObservedResult,
-    TraceRepository,
+    Contracts,
+    ExecutionStream,
+    Plugin,
+    Sentinel,
     configure,
-    observe,
-    observe_execution,
-    record_metadata,
+    execution,
+    get_current_execution_id,
+    get_current_execution_latency_ms,
+    get_current_trace_id,
+    span,
 )
-from sentinelai.tracing import trace_span
+from sentinelai.tracing import observe, trace_span
 
 
 def test_public_exports_are_importable() -> None:
-    assert observe is sentinelai.observe
-    assert observe_execution is sentinelai.observe_execution
     assert configure is sentinelai.configure
-    assert ExecutionMetadata is sentinelai.ExecutionMetadata
-    assert ObservedResult is sentinelai.ObservedResult
-    assert record_metadata is sentinelai.record_metadata
-    assert ExecutionContext is sentinelai.ExecutionContext
-    assert ExecutionSnapshot is sentinelai.ExecutionSnapshot
-    assert ExecutionRepository is sentinelai.ExecutionRepository
-    assert TraceRepository is sentinelai.TraceRepository
+    assert execution is sentinelai.execution
+    assert span is sentinelai.span
+    assert Sentinel is sentinelai.Sentinel
+    assert Contracts is sentinelai.Contracts
+    assert ExecutionStream is sentinelai.ExecutionStream
+    assert Plugin is sentinelai.Plugin
+    assert get_current_execution_id is sentinelai.get_current_execution_id
+    assert get_current_trace_id is sentinelai.get_current_trace_id
+    assert (
+        get_current_execution_latency_ms
+        is sentinelai.get_current_execution_latency_ms
+    )
+
+
+def test_frozen_surface_hides_lifecycle_management() -> None:
+    assert "ExecutionContext" not in sentinelai.__all__
+    assert "ObservedResult" not in sentinelai.__all__
+    assert "record_metadata" not in sentinelai.__all__
+    assert "ExecutionRepository" not in sentinelai.__all__
+    assert "TraceRepository" not in sentinelai.__all__
 
 
 def test_observe_is_trace_span_alias() -> None:

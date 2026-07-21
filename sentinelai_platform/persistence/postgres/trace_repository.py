@@ -3,13 +3,10 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from sentinelai.repositories.trace_repository import (
-    SpanRecord,
-    TraceRecord,
-    TraceRepository,
-)
 from sentinelai_platform.persistence.postgres.models_span import SpanModel
 from sentinelai_platform.persistence.postgres.models_trace import TraceModel
+from sentinelai_platform.projections import SpanRecord, TraceRecord
+from sentinelai_platform.repositories.trace import TraceRepository
 
 
 class PostgresTraceRepository(TraceRepository):

@@ -39,6 +39,13 @@ def test_execution_event_is_deeply_immutable() -> None:
     assert event.model_dump(mode="json")["payload"] == {
         "nested": {"items": [1, 2]}
     }
+    thawed = event.payload_dict()
+    assert thawed == {"nested": {"items": [1, 2]}}
+    assert isinstance(thawed, dict)
+    assert isinstance(thawed["nested"], dict)
+    assert isinstance(thawed["nested"]["items"], list)
+    thawed["nested"]["new"] = "ok"
+    assert "new" not in event.payload["nested"]
 
 
 @pytest.mark.parametrize(

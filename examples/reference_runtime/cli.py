@@ -5,12 +5,18 @@ from examples.reference_runtime.config import load_settings
 from examples.reference_runtime.errors import LLMError
 from examples.reference_runtime.executor import Executor
 from examples.reference_runtime.invoice import InvoiceExtractor
-from examples.reference_runtime.llm import OpenRouterClient
+from examples.reference_runtime.llm import create_llm_client
 from examples.reference_runtime.planner.planner import Planner
 from examples.reference_runtime.planner.schemas import Plan
 from examples.reference_runtime.schemas import InvoiceExtraction, LLMResponse
-from sentinelai.contracts import Trace
-from sentinelai.tracing.tracer import Tracer
+from sentinelai import (
+    Contracts,
+    configure,
+    execution,
+    get_current_execution_latency_ms,
+    get_current_trace_id,
+)
+from sentinelai.execution_stream import InMemoryExecutionStream
 
 
 def print_plan(plan: Plan) -> None:
@@ -46,43 +52,55 @@ def print_result(result: LLMResponse | InvoiceExtraction) -> None:
         print_chat_result(result)
 
 
-def print_trace_summary(trace: Trace) -> None:
+def print_trace_summary(trace_id: str, latency_ms: float) -> None:
     print("=" * 48)
     print("TRACE")
-    print(f"TRACE ID       : {trace.trace_id}")
-    print(f"TOTAL LATENCY  : {trace.total_latency_ms:.0f}ms")
-    print(f"SPANS          : {len(trace.spans)}")
+    print(f"TRACE ID       : {trace_id}")
+    print(f"TOTAL LATENCY  : {latency_ms:.0f}ms")
     print("=" * 48)
+
+
+@execution("cli.query")
+async def run_query(
+    planner: Planner,
+    executor: Executor,
+    user_query: str,
+) -> tuple[Plan, LLMResponse | InvoiceExtraction]:
+    plan = await planner.plan(user_query)
+    result = await executor.execute(plan, user_query)
+    return plan, result.output
 
 
 async def main() -> None:
     settings = load_settings()
+    configure(
+        publisher=InMemoryExecutionStream(),
+        model_info=Contracts.ModelInfo(
+            provider=settings.model_provider,
+            model_name=settings.model,
+        ),
+    )
 
-    async with OpenRouterClient(
-        api_key=settings.openrouter_api_key,
-        model=settings.model,
-        base_url=settings.base_url,
-    ) as client:
+    async with create_llm_client(settings) as client:
         planner = Planner(client)
         executor = Executor(client, InvoiceExtractor(client))
-        tracer = Tracer()
 
         user_query = input("Enter Query: ").strip()
         if not user_query:
             print("No query entered. Exiting.")
             return
 
-        with tracer.trace(metadata={"query": user_query}):
-            try:
-                plan = await planner.plan(user_query)
-                print_plan(plan)
-                execution = await executor.execute(plan, user_query)
-                print_result(execution.output)
-            except LLMError as exc:
-                print(f"Error: {exc}")
+        try:
+            plan, result = await run_query(planner, executor, user_query)
+            print_plan(plan)
+            print_result(result)
+        except LLMError as exc:
+            print(f"Error: {exc}")
 
-        if tracer.current_trace is not None:
-            print_trace_summary(tracer.current_trace)
+        trace_id = get_current_trace_id()
+        latency_ms = get_current_execution_latency_ms()
+        if trace_id is not None and latency_ms is not None:
+            print_trace_summary(trace_id, latency_ms)
 
 
 if __name__ == "__main__":

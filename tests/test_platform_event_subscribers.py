@@ -5,19 +5,20 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from sentinelai import ExecutionContext
 from sentinelai.contracts import (
-    ExecutionRecord,
     ExecutionSnapshot,
     ExecutionSummary,
     ModelInfo,
+    Span,
     Trace,
 )
+from sentinelai.execution.context import ExecutionContext
 from sentinelai.execution_stream import (
     ExecutionEvent,
     InMemoryExecutionStream,
 )
 from sentinelai_platform.event_subscribers import register_persistence_subscribers
+from sentinelai_platform.projections import ExecutionRecord
 
 
 class MemoryLifecycleRepository:
@@ -47,6 +48,8 @@ class MemorySnapshotRepository:
         self.saved: list[ExecutionSnapshot] = []
 
     async def save(self, snapshot: ExecutionSnapshot) -> ExecutionSnapshot:
+        # Mirror production repos: snapshot must be JSON-serializable.
+        snapshot.model_dump(mode="json")
         self.saved.append(snapshot)
         return snapshot
 
@@ -88,6 +91,8 @@ class MemoryTracePersister:
         self.persisted: list[tuple[Trace, UUID]] = []
 
     async def persist(self, trace: Trace, execution_id: UUID) -> str:
+        # Mirror production TracePersister: full JSON dump must succeed.
+        trace.model_dump_json()
         self.persisted.append((trace, execution_id))
         return f"traces/{trace.trace_id}.json"
 
@@ -126,6 +131,19 @@ async def test_platform_projects_execution_stream_into_existing_stores() -> None
             trace_id=str(uuid4()),
             started_at=datetime.now(UTC),
             ended_at=datetime.now(UTC),
+            metadata={"source": "test"},
+            spans=[
+                Span(
+                    id=str(uuid4()),
+                    name="llm.generate",
+                    start_time=datetime.now(UTC),
+                    end_time=datetime.now(UTC),
+                    input={"prompt": "hello"},
+                    output={"response": "world"},
+                    tokens={"prompt_tokens": 1, "completion_tokens": 1},
+                    status="ok",
+                )
+            ],
         )
     )
     context.mark_completed()
@@ -137,6 +155,8 @@ async def test_platform_projects_execution_stream_into_existing_stores() -> None
     assert event_types == [
         "execution.started",
         "trace.created",
+        "span.started",
+        "span.completed",
         "trace.completed",
         "verification.completed",
         "analysis.completed",

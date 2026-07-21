@@ -2,7 +2,7 @@ import asyncio
 
 from sentence_transformers import SentenceTransformer
 
-from sentinelai import observe
+from sentinelai import span
 
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -21,7 +21,7 @@ class EmbeddingService:
             self._model = SentenceTransformer(self._model_name)
         return self._model
 
-    @observe("embedding.generate")
+    @span("embedding.generate")
     def embed_sync(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []

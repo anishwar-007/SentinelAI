@@ -14,9 +14,13 @@ from examples.reference_runtime.retriever.schemas import IndexedDocument
 from examples.reference_runtime.schemas import LLMResponse
 from examples.reference_runtime.services.orchestrator import AIOrchestrator, EmptyQueryError
 from examples.reference_runtime.verifier.schemas import VerificationResult
-from sentinelai import ObservedResult, configure, observe, reset_configuration
+from sentinelai import (
+    configure,
+    get_current_execution_id,
+    get_current_trace_id,
+    span,
+)
 from sentinelai.contracts import (
-    ExecutionRecord,
     ExecutionSnapshot,
     ExecutionSummary,
     ModelInfo,
@@ -30,7 +34,9 @@ from sentinelai.execution_stream import (
     InMemoryExecutionStream,
     TraceCompleted,
 )
+from sentinelai.sdk.configure import reset_configuration
 from sentinelai_platform.event_subscribers import register_persistence_subscribers
+from sentinelai_platform.projections import ExecutionRecord
 
 
 class _MemoryLifecycle:
@@ -87,7 +93,7 @@ class _MemoryTracePersister:
 
 
 class _Planner:
-    @observe("planner", capture="plan", prompt_keys="planner")
+    @span("planner")
     async def plan(self, user_query: str) -> Plan:
         return Plan(
             intent="chat",
@@ -97,14 +103,7 @@ class _Planner:
 
 
 class _Executor:
-    @observe(
-        "executor",
-        capture={
-            "response": "output",
-            "retrieval_result": "retrieval_result",
-        },
-        prompt_keys="executor.{intent}",
-    )
+    @span("executor")
     async def execute(self, plan: Plan, user_query: str) -> ExecutionResult:
         del plan
         return ExecutionResult(
@@ -119,7 +118,7 @@ class _Executor:
 
 
 class _Verifier:
-    @observe("verifier", capture="verification", prompt_keys="verifier")
+    @span("verifier")
     async def verify(self, query: str, context: str, answer: str) -> VerificationResult:
         del context
         return VerificationResult(
@@ -130,7 +129,7 @@ class _Verifier:
 
 
 class _Analyzer:
-    @observe("root_cause_analysis", capture="analysis", prompt_keys="analyzer")
+    @span("root_cause_analysis")
     async def analyze(self, **kwargs: Any) -> RootCauseAnalysis:
         del kwargs
         return RootCauseAnalysis(
@@ -256,8 +255,6 @@ def _build_orchestrator() -> tuple[
         retriever=_Retriever(),  # type: ignore[arg-type]
         verifier=_Verifier(),  # type: ignore[arg-type]
         analyzer=_Analyzer(),  # type: ignore[arg-type]
-        execution_snapshots=snapshots,  # type: ignore[arg-type]
-        trace_persister=traces,  # type: ignore[arg-type]
     )
     return orchestrator, executions, snapshots, events
 
@@ -266,19 +263,21 @@ def _build_orchestrator() -> tuple[
 async def test_run_emits_events_and_persists_snapshot() -> None:
     orchestrator, executions, snapshots, events = _build_orchestrator()
 
-    observed = await orchestrator.run("What is the refund window?")
-    assert isinstance(observed, ObservedResult)
-    assert observed.value.intent == "chat"
-    assert observed.value.result["response"] == "answer:What is the refund window?"
-    assert observed.metadata.trace_id is not None
+    outcome = await orchestrator.run("What is the refund window?")
+    execution_id = get_current_execution_id()
+    assert execution_id is not None
+    assert outcome.intent == "chat"
+    assert outcome.result["response"] == "answer:What is the refund window?"
+    assert get_current_trace_id() is not None
     assert isinstance(events[0], ExecutionStarted)
     assert any(isinstance(event, TraceCompleted) for event in events)
     assert isinstance(events[-1], ExecutionCompleted)
-    assert events[-1].payload.get("snapshot") is not None
+    assert events[-1].payload.get("snapshot") is None
+    assert events[-1].payload.get("project_snapshot") is True
 
-    record = executions.records[observed.metadata.execution_id]
+    record = executions.records[execution_id]
     assert record.status == "completed"
-    snapshot = snapshots.snapshots[observed.metadata.execution_id]
+    snapshot = snapshots.snapshots[execution_id]
     assert snapshot.intent == "chat"
     assert snapshot.plan is not None
     assert snapshot.verification is not None
@@ -292,16 +291,18 @@ async def test_run_emits_events_and_persists_snapshot() -> None:
 async def test_index_document_omits_snapshot_but_updates_lifecycle() -> None:
     orchestrator, executions, snapshots, events = _build_orchestrator()
 
-    observed = await orchestrator.index_document(
+    outcome = await orchestrator.index_document(
         "policy text",
         filename="policy.txt",
     )
-    assert observed.value.document.filename == "policy.txt"
-    assert observed.metadata.intent == "document_index"
+    execution_id = get_current_execution_id()
+    assert execution_id is not None
+    assert outcome.document.filename == "policy.txt"
     terminal = events[-1]
     assert isinstance(terminal, ExecutionCompleted)
     assert "snapshot" not in terminal.payload
-    assert observed.metadata.execution_id in executions.records
+    assert terminal.payload["intent"] == "document_index"
+    assert execution_id in executions.records
     assert snapshots.snapshots == {}
 
 

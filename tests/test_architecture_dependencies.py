@@ -132,23 +132,27 @@ def test_sentinelai_package_imports_cleanly() -> None:
         for name in set(sys.modules) - modules_before
     )
     assert set(sentinelai.__all__) == {
-        "ExecutionContext",
-        "ExecutionMetadata",
-        "ExecutionRepository",
-        "ExecutionSnapshot",
+        "Contracts",
         "ExecutionStream",
-        "InMemoryExecutionStream",
-        "InstrumentationSettings",
-        "ModelInfo",
-        "ObservedResult",
-        "PromptReference",
-        "TraceRepository",
+        "Plugin",
+        "Sentinel",
         "configure",
-        "get_active_execution",
-        "get_settings",
-        "observe",
-        "observe_execution",
-        "prompt_reference",
-        "record_metadata",
-        "reset_configuration",
+        "execution",
+        "get_current_execution_id",
+        "get_current_execution_latency_ms",
+        "get_current_trace_id",
+        "span",
     }
+
+
+def test_sdk_does_not_import_platform_ports_or_repositories() -> None:
+    violations: list[str] = []
+    for path in _iter_python_files(SENTINELAI):
+        if "repositories" in path.parts or "ports" in path.parts:
+            # Compatibility shims may remain, but the frozen public surface
+            # and telemetry path must not depend on Platform packages.
+            continue
+        modules = _imported_modules(path)
+        if any(module.startswith("sentinelai_platform") for module in modules):
+            violations.append(str(path.relative_to(ROOT)))
+    assert violations == []

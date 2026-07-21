@@ -1,9 +1,7 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from sentinelai.contracts.tracing import SpanRecord, TraceRecord
-
-__all__ = ["SpanRecord", "TraceRecord", "TraceRepository"]
+from sentinelai_platform.projections import SpanRecord, TraceRecord
 
 
 class TraceRepository(ABC):

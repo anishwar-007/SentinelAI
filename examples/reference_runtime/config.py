@@ -6,7 +6,12 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-DEFAULT_MODEL: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
+from examples.reference_runtime.model_plugs import (
+    DEFAULT_MODEL_PLUG,
+    ModelPlug,
+    resolve_model_plug,
+)
+
 OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 DEFAULT_QDRANT_COLLECTION: str = "documents"
 DEFAULT_EMBEDDING_DIM: int = 384
@@ -16,7 +21,10 @@ DEFAULT_TRACES_DIR: str = "traces"
 
 class Settings(BaseModel):
     openrouter_api_key: str = Field(..., min_length=1)
-    model: str = DEFAULT_MODEL
+    model_plug: str = DEFAULT_MODEL_PLUG
+    model: str
+    model_fallbacks: tuple[str, ...] = ()
+    model_provider: str = "openrouter"
     base_url: str = OPENROUTER_BASE_URL
     database_url: str = Field(..., min_length=1)
     database_connect_args: dict[str, Any] = Field(default_factory=dict)
@@ -30,6 +38,15 @@ class Settings(BaseModel):
     storage_backend: str = "supabase"
     local_storage_dir: str = DEFAULT_LOCAL_STORAGE_DIR
     traces_dir: str = DEFAULT_TRACES_DIR
+
+    @property
+    def active_model_plug(self) -> ModelPlug:
+        return ModelPlug(
+            name=self.model_plug,
+            model=self.model,
+            fallbacks=self.model_fallbacks,
+            provider=self.model_provider,
+        )
 
 
 _LIBPQ_ONLY_QUERY_KEYS = frozenset(
@@ -84,6 +101,13 @@ def to_asyncpg_url(url: str) -> str:
     return cleaned
 
 
+def _parse_fallbacks(raw: str | None) -> tuple[str, ...] | None:
+    if raw is None:
+        return None
+    parts = tuple(part.strip() for part in raw.split(",") if part.strip())
+    return parts
+
+
 @lru_cache(maxsize=1)
 def load_settings() -> Settings:
     load_dotenv()
@@ -104,9 +128,18 @@ def load_settings() -> Settings:
     if not qdrant_url:
         raise RuntimeError("QDRANT_URL is not set.")
 
+    plug = resolve_model_plug(
+        plug_name=os.getenv("OPENROUTER_MODEL_PLUG"),
+        model_override=os.getenv("OPENROUTER_MODEL"),
+        fallbacks_override=_parse_fallbacks(os.getenv("OPENROUTER_MODEL_FALLBACKS")),
+    )
+
     return Settings(
         openrouter_api_key=api_key,
-        model=os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL),
+        model_plug=plug.name,
+        model=plug.model,
+        model_fallbacks=plug.fallbacks,
+        model_provider=plug.provider,
         base_url=os.getenv("OPENROUTER_BASE_URL", OPENROUTER_BASE_URL),
         database_url=async_database_url,
         database_connect_args=database_connect_args,

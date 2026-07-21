@@ -11,6 +11,8 @@ from sentinelai.execution.active import (
     apply_capture,
     apply_prompt_keys,
     get_active_execution,
+    infer_prompt_keys,
+    infer_span_result,
 )
 from sentinelai.tracing.context import TraceContext
 from sentinelai.tracing.tracer import Tracer
@@ -104,25 +106,51 @@ def _finalize_span(
 
 def _record_execution_side_effects(
     *,
+    name: str,
     capture: str | Mapping[str, str] | None,
     prompt_keys: str | Sequence[str] | None,
     result: Any,
 ) -> None:
-    if capture is None and prompt_keys is None:
-        return
     execution = get_active_execution()
     if execution is None:
         return
     if capture is not None:
         apply_capture(execution, capture, result)
-    if prompt_keys is not None:
+    else:
+        infer_span_result(execution, name, result)
+
+    resolved_prompt_keys = prompt_keys or infer_prompt_keys(execution, name)
+    if resolved_prompt_keys:
         from sentinelai.sdk.configure import get_settings
 
         try:
             catalog = get_settings().prompt_catalog
         except RuntimeError:
             return
-        apply_prompt_keys(execution, prompt_keys, catalog=catalog)
+        apply_prompt_keys(execution, resolved_prompt_keys, catalog=catalog)
+
+
+def _inject_trace_snapshot(
+    fn: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    tracer: Tracer | None,
+) -> dict[str, Any]:
+    """Inject a plain trace document into an explicitly declared business input."""
+    if tracer is None or tracer.current_trace is None or "trace_snapshot" in kwargs:
+        return kwargs
+    try:
+        signature = inspect.signature(fn)
+        if "trace_snapshot" not in signature.parameters:
+            return kwargs
+        bound = signature.bind_partial(*args, **kwargs)
+        if "trace_snapshot" in bound.arguments:
+            return kwargs
+    except TypeError:
+        return kwargs
+    enriched = dict(kwargs)
+    enriched["trace_snapshot"] = tracer.current_trace.model_dump(mode="json")
+    return enriched
 
 
 def trace_span(
@@ -137,9 +165,16 @@ def trace_span(
             @functools.wraps(fn)
             async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
                 tracer = TraceContext.get_tracer()
+                call_kwargs = _inject_trace_snapshot(
+                    fn,
+                    tuple(args),
+                    dict(kwargs),
+                    tracer,
+                )
                 if tracer is None:
-                    bare_result = await fn(*args, **kwargs)
+                    bare_result = await fn(*args, **call_kwargs)
                     _record_execution_side_effects(
+                        name=name,
                         capture=capture,
                         prompt_keys=prompt_keys,
                         result=bare_result,
@@ -148,15 +183,16 @@ def trace_span(
 
                 span = tracer.start_span(
                     name,
-                    payload=_capture_input(fn, args, kwargs),
+                    payload=_capture_input(fn, tuple(args), call_kwargs),
                 )
                 status: SpanStatus = "error"
                 error: str | None = None
                 result: Any = None
                 try:
-                    result = await fn(*args, **kwargs)
+                    result = await fn(*args, **call_kwargs)
                     status = "ok"
                     _record_execution_side_effects(
+                        name=name,
                         capture=capture,
                         prompt_keys=prompt_keys,
                         result=result,
@@ -179,9 +215,16 @@ def trace_span(
         @functools.wraps(fn)
         def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
             tracer = TraceContext.get_tracer()
+            call_kwargs = _inject_trace_snapshot(
+                fn,
+                tuple(args),
+                dict(kwargs),
+                tracer,
+            )
             if tracer is None:
-                bare_result = fn(*args, **kwargs)
+                bare_result = fn(*args, **call_kwargs)
                 _record_execution_side_effects(
+                    name=name,
                     capture=capture,
                     prompt_keys=prompt_keys,
                     result=bare_result,
@@ -190,15 +233,16 @@ def trace_span(
 
             span = tracer.start_span(
                 name,
-                payload=_capture_input(fn, args, kwargs),
+                payload=_capture_input(fn, tuple(args), call_kwargs),
             )
             status: SpanStatus = "error"
             error: str | None = None
             result: Any = None
             try:
-                result = fn(*args, **kwargs)
+                result = fn(*args, **call_kwargs)
                 status = "ok"
                 _record_execution_side_effects(
+                    name=name,
                     capture=capture,
                     prompt_keys=prompt_keys,
                     result=result,

@@ -14,11 +14,11 @@ from sentinelai.contracts import (
     ExecutionSummary,
     TerminalExecutionStatus,
 )
-from sentinelai.repositories.execution_repository import (
+from sentinelai_platform.persistence.postgres.models_snapshot import ExecutionSnapshotModel
+from sentinelai_platform.repositories.execution import (
     ExecutionSnapshotAlreadyExistsError,
     ExecutionSnapshotRepository,
 )
-from sentinelai_platform.persistence.postgres.models_snapshot import ExecutionSnapshotModel
 
 
 class PostgresExecutionSnapshotRepository(ExecutionSnapshotRepository):

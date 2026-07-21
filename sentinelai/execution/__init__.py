@@ -1,10 +1,12 @@
 from sentinelai.contracts import (
-    CURRENT_REPOSITORY_VERSION,
     ExecutionSnapshot,
     ExecutionStatus,
     ExecutionSummary,
     ModelInfo,
     PromptReference,
+)
+from sentinelai.contracts.execution import (
+    CURRENT_REPOSITORY_VERSION,
     SnapshotCreationMetrics,
 )
 from sentinelai.execution.active import (

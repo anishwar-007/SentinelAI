@@ -8,8 +8,8 @@ from examples.reference_runtime.db.repositories.document_repository import (
     DocumentRepository,
 )
 from examples.reference_runtime.retriever.schemas import IndexedDocument
-from sentinelai import observe
-from sentinelai.ports.storage import StorageProvider
+from sentinelai import span
+from sentinelai_platform.ports.storage import StorageProvider
 
 DocumentStatus = Literal["indexing", "ready", "failed"]
 
@@ -29,14 +29,14 @@ class DocumentRegistry:
         self._documents = documents
         self._storage = storage
 
-    @observe("registry.duplicate_check")
+    @span("registry.duplicate_check")
     async def find_by_hash(self, content_hash: str) -> IndexedDocument | None:
         record = await self._documents.find_by_hash(content_hash)
         if record is None:
             return None
         return _to_indexed(record)
 
-    @observe("registry.register_document")
+    @span("registry.register_document")
     async def register_document(
         self,
         document: IndexedDocument,
@@ -74,7 +74,7 @@ class DocumentRegistry:
         created = await self._documents.create(record)
         return _to_indexed(created)
 
-    @observe("registry.update_status")
+    @span("registry.update_status")
     async def update_status(
         self,
         document_id: UUID,

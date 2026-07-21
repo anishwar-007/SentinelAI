@@ -1,10 +1,12 @@
 import time
 import uuid
+from collections.abc import Sequence
 from types import TracebackType
+from typing import Protocol
 
 import httpx
 
-from examples.reference_runtime.config import OPENROUTER_BASE_URL
+from examples.reference_runtime.config import OPENROUTER_BASE_URL, Settings
 from examples.reference_runtime.errors import (
     LLMError,
     ModelAuthenticationError,
@@ -15,9 +17,10 @@ from examples.reference_runtime.errors import (
     ModelValidationError,
 )
 from examples.reference_runtime.schemas import ChatMessage, LLMResponse
-from sentinelai import observe
+from sentinelai import span
 
 __all__ = [
+    "LLMClient",
     "LLMError",
     "ModelAuthenticationError",
     "ModelRateLimitError",
@@ -26,7 +29,16 @@ __all__ = [
     "ModelUnavailableError",
     "ModelValidationError",
     "OpenRouterClient",
+    "create_llm_client",
 ]
+
+
+class LLMClient(Protocol):
+    """Provider-agnostic chat client used by planner / executor / verifier."""
+
+    async def generate(self, prompt: str, *, json_mode: bool = False) -> LLMResponse: ...
+
+    async def aclose(self) -> None: ...
 
 
 class OpenRouterClient:
@@ -34,14 +46,25 @@ class OpenRouterClient:
         self,
         api_key: str,
         model: str,
+        *,
+        fallbacks: Sequence[str] = (),
         base_url: str = OPENROUTER_BASE_URL,
         timeout: float = 120.0,
     ) -> None:
         self._api_key = api_key
         self._model = model
+        self._fallbacks = tuple(fallbacks)
         self._base_url = base_url
         self._timeout = timeout
         self._http = httpx.AsyncClient(timeout=timeout)
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    @property
+    def fallbacks(self) -> tuple[str, ...]:
+        return self._fallbacks
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -65,19 +88,25 @@ class OpenRouterClient:
             "X-Title": "AI Observability Platform",
         }
 
-    def _build_payload(self, prompt: str) -> dict[str, object]:
+    def _build_payload(self, prompt: str, *, json_mode: bool = False) -> dict[str, object]:
         user_message = ChatMessage(role="user", content=prompt)
-        return {
+        payload: dict[str, object] = {
             "model": self._model,
             "messages": [user_message.model_dump()],
         }
+        # OpenRouter model-layer failover: try next model on rate limit / downtime.
+        if self._fallbacks:
+            payload["models"] = list(self._fallbacks)
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        return payload
 
-    @observe("llm.generate")
-    async def generate(self, prompt: str) -> LLMResponse:
+    @span("llm.generate")
+    async def generate(self, prompt: str, *, json_mode: bool = False) -> LLMResponse:
         request_id = str(uuid.uuid4())
         url = f"{self._base_url}/chat/completions"
         headers = self._build_headers()
-        payload = self._build_payload(prompt)
+        payload = self._build_payload(prompt, json_mode=json_mode)
 
         start = time.perf_counter()
 
@@ -171,3 +200,18 @@ class OpenRouterClient:
             latency_ms=latency_ms,
             raw_response=data,
         )
+
+
+def create_llm_client(settings: Settings) -> OpenRouterClient:
+    """Build the configured LLM client from settings (plug-and-play entrypoint)."""
+    if settings.model_provider != "openrouter":
+        raise ValueError(
+            f"Unsupported model provider {settings.model_provider!r}. "
+            "Add a client factory branch for new providers."
+        )
+    return OpenRouterClient(
+        api_key=settings.openrouter_api_key,
+        model=settings.model,
+        fallbacks=settings.model_fallbacks,
+        base_url=settings.base_url,
+    )

@@ -13,6 +13,7 @@ from typing import Any, ParamSpec, TypeVar, cast
 from sentinelai.contracts import TerminalExecutionStatus
 from sentinelai.execution.active import (
     get_active_execution,
+    infer_boundary_result,
     record_metadata,
     reset_active_execution,
     select_prompt_references,
@@ -20,6 +21,10 @@ from sentinelai.execution.active import (
 )
 from sentinelai.execution.context import ExecutionContext
 from sentinelai.sdk.configure import get_settings
+from sentinelai.sdk.correlation import (
+    _clear_completed_correlation,
+    _set_completed_correlation,
+)
 from sentinelai.sdk.metadata import ExecutionMetadata, ObservedResult
 
 P = ParamSpec("P")
@@ -127,6 +132,7 @@ async def _run_observed(
     )
     context.mark_running()
 
+    _clear_completed_correlation()
     token = set_active_execution(context)
     context_error: BaseException | None = None
     result: Any = None
@@ -137,6 +143,7 @@ async def _run_observed(
                 result = await fn(*args, **kwargs)
                 if capture_result is not None:
                     context.set_stage(capture_result, result)
+                infer_boundary_result(context, result)
                 if context.execution_status == "running":
                     context.mark_completed()
             except asyncio.CancelledError as exc:
@@ -149,20 +156,28 @@ async def _run_observed(
                 raise
     finally:
         try:
-            await context.publish_terminal(
-                settings.publisher,
-                include_snapshot=include_snapshot,
+            try:
+                await context.publish_terminal(
+                    settings.publisher,
+                    include_snapshot=False,
+                    project_snapshot=include_snapshot,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to publish terminal execution %s",
+                    context.execution_id,
+                )
+                if context_error is None:
+                    context.mark_failed()
+                    raise
+        finally:
+            trace = context.trace
+            _set_completed_correlation(
+                execution_id=context.execution_id,
+                trace_id=trace.trace_id if trace is not None else None,
+                latency_ms=trace.total_latency_ms if trace is not None else None,
             )
-        except Exception:
-            logger.exception(
-                "Failed to publish terminal execution %s",
-                context.execution_id,
-            )
-            if context_error is None:
-                context.mark_failed()
-                reset_active_execution(token)
-                raise
-        reset_active_execution(token)
+            reset_active_execution(token)
 
     if return_metadata:
         return ObservedResult(value=result, metadata=_execution_metadata(context))

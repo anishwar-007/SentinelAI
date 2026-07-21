@@ -8,12 +8,11 @@ import pytest
 from pydantic import BaseModel
 
 from sentinelai import (
-    ObservedResult,
     configure,
-    observe,
-    observe_execution,
-    record_metadata,
-    reset_configuration,
+    execution,
+    get_current_execution_id,
+    get_current_trace_id,
+    span,
 )
 from sentinelai.contracts import ModelInfo, PromptReference
 from sentinelai.execution_stream import (
@@ -25,6 +24,7 @@ from sentinelai.execution_stream import (
     InMemoryExecutionStream,
     TraceCompleted,
 )
+from sentinelai.sdk.configure import reset_configuration
 
 
 @pytest.fixture(autouse=True)
@@ -42,6 +42,13 @@ class _Plan(BaseModel):
 class _ExecutionResult(BaseModel):
     output: dict[str, Any]
     retrieval_result: dict[str, Any] | None = None
+
+
+class _RunOutcome(BaseModel):
+    intent: str
+    result: dict[str, Any]
+    verification: dict[str, Any] | None = None
+    verification_status: str = "ok"
 
 
 class _Capture:
@@ -83,31 +90,29 @@ def _configure(stream: InMemoryExecutionStream) -> _Capture:
 
 
 @pytest.mark.asyncio
-async def test_observe_execution_publishes_started_and_completed() -> None:
+async def test_execution_publishes_started_and_completed() -> None:
     stream = InMemoryExecutionStream()
     capture = _configure(stream)
 
-    @observe_execution(execution_name="query", return_metadata=True)
+    @execution("query")
     async def run(query: str) -> dict[str, str]:
         return {"answer": query}
 
     result = await run("hello")
-    assert isinstance(result, ObservedResult)
-    assert result.value == {"answer": "hello"}
-    assert isinstance(result.metadata.execution_id, UUID)
-    assert result.metadata.trace_id is not None
-    assert result.metadata.execution_status == "completed"
+    assert result == {"answer": "hello"}
+    assert isinstance(get_current_execution_id(), UUID)
+    assert get_current_trace_id() is not None
     assert isinstance(capture.events[0], ExecutionStarted)
     assert isinstance(capture.events[-1], ExecutionCompleted)
     assert any(isinstance(event, TraceCompleted) for event in capture.events)
 
 
 @pytest.mark.asyncio
-async def test_observe_execution_marks_failure_and_preserves_exception() -> None:
+async def test_execution_marks_failure_and_preserves_exception() -> None:
     stream = InMemoryExecutionStream()
     capture = _configure(stream)
 
-    @observe_execution(execution_name="query")
+    @execution("query")
     async def run(query: str) -> str:
         raise RuntimeError(f"boom:{query}")
 
@@ -116,17 +121,15 @@ async def test_observe_execution_marks_failure_and_preserves_exception() -> None
 
     assert isinstance(capture.events[0], ExecutionStarted)
     assert isinstance(capture.events[-1], ExecutionFailed)
-    assert capture.events[-1].payload["snapshot"]["metadata"]["error_type"] == (
-        "RuntimeError"
-    )
+    assert capture.events[-1].metadata["error_type"] == "RuntimeError"
 
 
 @pytest.mark.asyncio
-async def test_observe_execution_marks_cancellation() -> None:
+async def test_execution_marks_cancellation() -> None:
     stream = InMemoryExecutionStream()
     capture = _configure(stream)
 
-    @observe_execution(execution_name="query")
+    @execution("query")
     async def run(query: str) -> str:
         raise asyncio.CancelledError()
 
@@ -137,59 +140,56 @@ async def test_observe_execution_marks_cancellation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_declarative_capture_and_prompt_selection() -> None:
+async def test_span_inference_and_prompt_selection() -> None:
     stream = InMemoryExecutionStream()
     capture = _configure(stream)
 
-    @observe("planner", capture="plan", prompt_keys="planner")
+    @span("planner")
     async def plan(user_query: str) -> _Plan:
         return _Plan(intent="chat", confidence=0.9)
 
-    @observe(
-        "executor",
-        capture={"response": "output", "retrieval_result": "retrieval_result"},
-        prompt_keys="executor.{intent}",
-    )
+    @span("executor")
     async def execute(plan_result: _Plan, user_query: str) -> _ExecutionResult:
         return _ExecutionResult(
             output={"response": f"answer:{user_query}"},
             retrieval_result=None,
         )
 
-    @observe("verifier", capture="verification", prompt_keys="verifier")
+    @span("verifier")
     async def verify(answer: str) -> dict[str, Any]:
         return {"supported": True, "answer": answer}
 
-    @observe_execution(
-        execution_name="query",
-        prompt_keys="planner",
-        return_metadata=True,
-    )
-    async def run(query: str) -> str:
+    @execution("query")
+    async def run(query: str) -> _RunOutcome:
         planned = await plan(query)
         executed = await execute(planned, query)
-        await verify(executed.output["response"])
-        record_metadata(verification_status="ok")
-        return executed.output["response"]
+        verification = await verify(executed.output["response"])
+        return _RunOutcome(
+            intent=planned.intent,
+            result=executed.output,
+            verification=verification,
+            verification_status="ok",
+        )
 
     result = await run("refund window")
-    assert result.value == "answer:refund window"
+    assert result.result["response"] == "answer:refund window"
     terminal = capture.events[-1]
     assert isinstance(terminal, ExecutionCompleted)
-    snapshot = terminal.payload["snapshot"]
-    assert snapshot["intent"] == "chat"
-    assert snapshot["plan"]["intent"] == "chat"
-    assert snapshot["response"]["response"] == "answer:refund window"
-    assert snapshot["verification"]["supported"] is True
-    assert "planner" in snapshot["prompt_references"]
-    assert "executor.chat" in snapshot["prompt_references"]
-    assert "verifier" in snapshot["prompt_references"]
-    assert snapshot["metadata"]["verification_status"] == "ok"
+    assert "snapshot" not in terminal.payload
+    assert terminal.payload["project_snapshot"] is True
+    assert terminal.payload["intent"] == "chat"
+    assert terminal.payload["plan"]["intent"] == "chat"
+    assert terminal.payload["response"]["response"] == "answer:refund window"
+    assert terminal.payload["verification"]["supported"] is True
+    assert "planner" in terminal.payload["prompt_references"]
+    assert "executor.chat" in terminal.payload["prompt_references"]
+    assert "verifier" in terminal.payload["prompt_references"]
+    assert terminal.metadata["verification_status"] == "ok"
 
 
 @pytest.mark.asyncio
-async def test_capture_is_noop_without_active_execution() -> None:
-    @observe("planner", capture="plan")
+async def test_span_is_noop_without_active_execution() -> None:
+    @span("planner")
     async def plan(user_query: str) -> _Plan:
         return _Plan(intent="chat", confidence=0.5)
 
@@ -198,25 +198,30 @@ async def test_capture_is_noop_without_active_execution() -> None:
 
 
 @pytest.mark.asyncio
-async def test_index_style_execution_omits_snapshot() -> None:
+async def test_index_style_execution_omits_snapshot_projection() -> None:
     stream = InMemoryExecutionStream()
     capture = _configure(stream)
 
-    @observe_execution(
-        execution_name="index_document",
-        query=lambda content, filename=None, **_: f"index_document:{filename or 'untitled.txt'}",
+    @execution(
+        "index_document",
+        query=lambda content, filename=None, **_: (
+            f"index_document:{filename or 'untitled.txt'}"
+        ),
         intent="document_index",
         include_snapshot=False,
-        return_metadata=True,
     )
-    async def index_document(content: str, filename: str | None = None) -> dict[str, str]:
+    async def index_document(
+        content: str,
+        filename: str | None = None,
+    ) -> dict[str, str]:
         return {"content": content, "filename": filename or "untitled.txt"}
 
     result = await index_document("doc body", filename="policy.txt")
-    assert result.metadata.intent == "document_index"
+    assert result["filename"] == "policy.txt"
     terminal = capture.events[-1]
     assert isinstance(terminal, ExecutionCompleted)
-    assert "snapshot" not in terminal.payload
+    assert "snapshot" not in terminal.payload or terminal.payload.get("snapshot") is None
+    assert terminal.payload.get("project_snapshot") is False
     assert terminal.payload["query"] == "index_document:policy.txt"
 
 
@@ -226,7 +231,7 @@ async def test_nested_executions_isolate_contextvars() -> None:
     _configure(stream)
     seen: list[str] = []
 
-    @observe_execution(execution_name="inner")
+    @execution("inner")
     async def inner(query: str) -> str:
         from sentinelai.execution.active import get_active_execution
 
@@ -235,7 +240,7 @@ async def test_nested_executions_isolate_contextvars() -> None:
         seen.append(context.query)
         return query
 
-    @observe_execution(execution_name="outer")
+    @execution("outer")
     async def outer(query: str) -> str:
         from sentinelai.execution.active import get_active_execution
 
@@ -267,7 +272,7 @@ async def test_publication_failure_does_not_mask_business_error() -> None:
         model_info=ModelInfo(provider="test", model_name="test-model"),
     )
 
-    @observe_execution(execution_name="query")
+    @execution("query")
     async def run(query: str) -> str:
         raise ValueError("business failure")
 
@@ -277,7 +282,7 @@ async def test_publication_failure_does_not_mask_business_error() -> None:
 
 @pytest.mark.asyncio
 async def test_requires_configuration() -> None:
-    @observe_execution(execution_name="query")
+    @execution("query")
     async def run(query: str) -> str:
         return query
 
@@ -290,14 +295,13 @@ async def test_concurrent_executions_keep_distinct_ids() -> None:
     stream = InMemoryExecutionStream()
     capture = _configure(stream)
 
-    @observe_execution(execution_name="query", return_metadata=True)
+    @execution("query")
     async def run(query: str) -> str:
         await asyncio.sleep(0.01)
         return query
 
     results = await asyncio.gather(run("one"), run("two"))
-    ids = {result.metadata.execution_id for result in results}
-    assert len(ids) == 2
+    assert set(results) == {"one", "two"}
     started = [event for event in capture.events if isinstance(event, ExecutionStarted)]
     assert len(started) == 2
-    assert {event.execution_id for event in started} == ids
+    assert len({event.execution_id for event in started}) == 2

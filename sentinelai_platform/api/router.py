@@ -4,8 +4,8 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Request
 
 from sentinelai.contracts import ExecutionSnapshot, ExecutionSummary
-from sentinelai.repositories.execution_repository import ExecutionRepository
 from sentinelai_platform.execution_store.trace_persister import TracePersister
+from sentinelai_platform.repositories.execution import ExecutionSnapshotRepository
 
 router = APIRouter()
 
@@ -18,10 +18,12 @@ class TraceNotFoundError(LookupError):
     pass
 
 
-def get_execution_repository(request: Request) -> ExecutionRepository:
+def get_execution_repository(request: Request) -> ExecutionSnapshotRepository:
     repository = getattr(request.app.state, "execution_repository", None)
     if repository is None:
-        raise RuntimeError("ExecutionRepository is not configured on app.state.")
+        raise RuntimeError(
+            "ExecutionSnapshotRepository is not configured on app.state."
+        )
     return repository  # type: ignore[no-any-return]
 
 

@@ -7,11 +7,9 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from sentinelai.repositories.execution_lifecycle_repository import (
-    ExecutionLifecycleRepository,
-    ExecutionRecord,
-)
 from sentinelai_platform.persistence.postgres.models_execution import ExecutionModel
+from sentinelai_platform.projections import ExecutionRecord
+from sentinelai_platform.repositories.execution import ExecutionLifecycleRepository
 
 
 class PostgresExecutionLifecycleRepository(ExecutionLifecycleRepository):

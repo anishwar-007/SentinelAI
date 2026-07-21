@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 
-from sentinelai.ports.storage import StorageProvider
+from sentinelai_platform.ports.storage import StorageProvider
 
 
 class LocalStorageProvider(StorageProvider):

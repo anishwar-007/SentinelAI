@@ -6,11 +6,7 @@ from fastapi.responses import JSONResponse
 
 from examples.reference_runtime.errors import LLMError
 from examples.reference_runtime.retriever.registry import DocumentNotFoundError
-from examples.reference_runtime.services.orchestrator import (
-    EmptyQueryError,
-    ExecutionSnapshotNotFoundError,
-    TraceNotFoundError,
-)
+from examples.reference_runtime.services.orchestrator import EmptyQueryError
 
 logger = logging.getLogger("tracerai.api")
 
@@ -22,20 +18,6 @@ def register_exception_handlers(app: FastAPI) -> None:
         exc: EmptyQueryError,
     ) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(exc)})
-
-    @app.exception_handler(TraceNotFoundError)
-    async def trace_not_found_handler(
-        _request: Request,
-        exc: TraceNotFoundError,
-    ) -> JSONResponse:
-        return JSONResponse(status_code=404, content={"detail": str(exc)})
-
-    @app.exception_handler(ExecutionSnapshotNotFoundError)
-    async def execution_snapshot_not_found_handler(
-        _request: Request,
-        exc: ExecutionSnapshotNotFoundError,
-    ) -> JSONResponse:
-        return JSONResponse(status_code=404, content={"detail": str(exc)})
 
     @app.exception_handler(DocumentNotFoundError)
     async def document_not_found_handler(

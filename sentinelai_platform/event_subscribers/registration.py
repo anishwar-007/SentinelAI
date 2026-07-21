@@ -9,10 +9,6 @@ from sentinelai.execution_stream import (
     ExecutionStream,
     TraceCompleted,
 )
-from sentinelai.repositories.execution_lifecycle_repository import (
-    ExecutionLifecycleRepository,
-)
-from sentinelai.repositories.execution_repository import ExecutionRepository
 from sentinelai_platform.event_subscribers.execution import (
     ExecutionCancelledSubscriber,
     ExecutionCompletedSubscriber,
@@ -21,13 +17,17 @@ from sentinelai_platform.event_subscribers.execution import (
 )
 from sentinelai_platform.event_subscribers.trace import TraceCompletedSubscriber
 from sentinelai_platform.execution_store import TracePersister
+from sentinelai_platform.repositories.execution import (
+    ExecutionLifecycleRepository,
+    ExecutionSnapshotRepository,
+)
 
 
 def register_persistence_subscribers(
     stream: ExecutionStream,
     *,
     executions: ExecutionLifecycleRepository,
-    snapshots: ExecutionRepository,
+    snapshots: ExecutionSnapshotRepository,
     trace_persister: TracePersister,
 ) -> tuple[ExecutionEventSubscriber, ...]:
     """Attach the current Platform persistence projections to a stream."""

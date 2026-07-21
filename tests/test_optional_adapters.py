@@ -30,7 +30,7 @@ def test_postgres_adapter_importable() -> None:
 def test_storage_adapters_importable() -> None:
     local = importlib.import_module("sentinelai_platform.storage.local_provider")
     supabase = importlib.import_module("sentinelai_platform.storage.supabase_provider")
-    provider = importlib.import_module("sentinelai.ports.storage")
+    provider = importlib.import_module("sentinelai_platform.ports.storage")
     assert hasattr(local, "LocalStorageProvider")
     assert hasattr(supabase, "SupabaseStorageProvider")
     assert hasattr(provider, "StorageProvider")

@@ -3,12 +3,9 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from sentinelai.contracts import Trace
-from sentinelai.ports.storage import StorageProvider
-from sentinelai.repositories.trace_repository import (
-    SpanRecord,
-    TraceRecord,
-    TraceRepository,
-)
+from sentinelai_platform.ports.storage import StorageProvider
+from sentinelai_platform.projections import SpanRecord, TraceRecord
+from sentinelai_platform.repositories.trace import TraceRepository
 
 
 class TracePersister:

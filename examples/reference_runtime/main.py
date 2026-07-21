@@ -1,4 +1,6 @@
-from collections.abc import AsyncIterator
+import hashlib
+import inspect
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -13,7 +15,7 @@ from examples.reference_runtime.db.repositories.postgres_document_repository imp
 )
 from examples.reference_runtime.executor import Executor
 from examples.reference_runtime.invoice import InvoiceExtractor
-from examples.reference_runtime.llm import OpenRouterClient
+from examples.reference_runtime.llm import OpenRouterClient, create_llm_client
 from examples.reference_runtime.planner.planner import Planner
 from examples.reference_runtime.planner.prompts import plan_user_query_prompt
 from examples.reference_runtime.prompts import extract_invoice_prompt
@@ -27,10 +29,8 @@ from examples.reference_runtime.retriever.retriever import (
 from examples.reference_runtime.services.orchestrator import AIOrchestrator
 from examples.reference_runtime.verifier.prompts import verification_prompt
 from examples.reference_runtime.verifier.verifier import Verifier
-from sentinelai import configure
-from sentinelai.execution import ModelInfo, prompt_reference
+from sentinelai import Contracts, configure
 from sentinelai.execution_stream import InMemoryExecutionStream
-from sentinelai.ports.storage import StorageProvider
 from sentinelai_platform.api import (
     register_exception_handlers as register_platform_exception_handlers,
 )
@@ -44,8 +44,27 @@ from sentinelai_platform.persistence.postgres import (
     create_engine,
     create_session_factory,
 )
+from sentinelai_platform.ports.storage import StorageProvider
 from sentinelai_platform.storage.local_provider import LocalStorageProvider
 from sentinelai_platform.storage.supabase_provider import SupabaseStorageProvider
+
+
+def _prompt_reference(
+    *,
+    prompt_id: str,
+    version: str,
+    name: str,
+    source: Callable[..., object],
+) -> Contracts.PromptReference:
+    source_hash = hashlib.sha256(
+        inspect.getsource(source).encode("utf-8")
+    ).hexdigest()
+    return Contracts.PromptReference(
+        prompt_id=prompt_id,
+        version=version,
+        name=name,
+        hash=source_hash,
+    )
 
 
 @asynccontextmanager
@@ -91,11 +110,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         registry=registry,
     )
 
-    client = OpenRouterClient(
-        api_key=settings.openrouter_api_key,
-        model=settings.model,
-        base_url=settings.base_url,
-    )
+    client = create_llm_client(settings)
     planner = Planner(client)
     executor = Executor(client, InvoiceExtractor(client), retriever=retriever)
     verifier = Verifier(client)
@@ -108,43 +123,43 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         snapshots=execution_snapshot_repository,
         trace_persister=trace_persister,
     )
-    model_info = ModelInfo(
-        provider="openrouter",
+    model_info = Contracts.ModelInfo(
+        provider=settings.model_provider,
         model_name=settings.model,
         reasoning_enabled=False,
     )
     prompt_catalog = {
-        "planner": prompt_reference(
+        "planner": _prompt_reference(
             prompt_id="planner.plan_user_query",
             version="v1",
             name="Query Planner",
             source=plan_user_query_prompt,
         ),
-        "executor.chat": prompt_reference(
+        "executor.chat": _prompt_reference(
             prompt_id="executor.chat",
             version="v1",
             name="Chat Completion",
             source=OpenRouterClient._build_payload,
         ),
-        "executor.invoice_extraction": prompt_reference(
+        "executor.invoice_extraction": _prompt_reference(
             prompt_id="executor.invoice_extraction",
             version="v1",
             name="Invoice Extraction",
             source=extract_invoice_prompt,
         ),
-        "executor.retrieval": prompt_reference(
+        "executor.retrieval": _prompt_reference(
             prompt_id="executor.retrieval",
             version="v1",
             name="Retrieval Context Injection",
             source=inject_context,
         ),
-        "verifier": prompt_reference(
+        "verifier": _prompt_reference(
             prompt_id="verifier.answer",
             version="v1",
             name="Answer Verification",
             source=verification_prompt,
         ),
-        "analyzer": prompt_reference(
+        "analyzer": _prompt_reference(
             prompt_id="analyzer.root_cause",
             version="v1",
             name="Root Cause Analysis",
@@ -162,8 +177,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         retriever=retriever,
         verifier=verifier,
         analyzer=analyzer,
-        execution_snapshots=execution_snapshot_repository,
-        trace_persister=trace_persister,
     )
 
     app.state.engine = engine

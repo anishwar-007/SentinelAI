@@ -12,7 +12,7 @@ from examples.reference_runtime.retriever.schemas import (
     RetrieverResult,
     SearchResult,
 )
-from sentinelai import observe
+from sentinelai import span
 
 
 class SupportsVectorStore(Protocol):
@@ -141,7 +141,7 @@ class DocumentRetriever:
         return RetrieverResult(query=cleaned, results=results, top_k=k)
 
 
-@observe("retrieval.context_injection")
+@span("retrieval.context_injection")
 def inject_context(query: str, retrieval: RetrieverResult) -> str:
     context = format_retrieved_context(retrieval)
     if not context:

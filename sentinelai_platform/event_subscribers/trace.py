@@ -16,7 +16,9 @@ class TraceCompletedSubscriber:
     async def handle(self, event: ExecutionEvent) -> None:
         if not isinstance(event, TraceCompleted):
             return
-        raw_trace = event.payload.get("trace")
+        # Events keep payload frozen (MappingProxy); thaw before domain validate
+        # so Trace.model_dump_json does not see non-serializable proxies.
+        raw_trace = event.payload_dict().get("trace")
         if raw_trace is None:
             raise ValueError("TraceCompleted payload requires a trace.")
         trace = Trace.model_validate(raw_trace)

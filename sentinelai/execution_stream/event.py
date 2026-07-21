@@ -41,6 +41,14 @@ class ExecutionEvent(BaseModel):
     def _serialize_mapping(self, value: EventPayload) -> dict[str, Any]:
         return thaw_mapping(value)
 
+    def payload_dict(self) -> dict[str, Any]:
+        """Return a mutable, JSON-serializable copy of the frozen payload."""
+        return thaw_mapping(self.payload)
+
+    def metadata_dict(self) -> dict[str, Any]:
+        """Return a mutable, JSON-serializable copy of the frozen metadata."""
+        return thaw_mapping(self.metadata)
+
 
 class ExecutionStarted(ExecutionEvent):
     event_type: Literal["execution.started"] = "execution.started"

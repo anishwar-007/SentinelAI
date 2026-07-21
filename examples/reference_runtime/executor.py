@@ -3,7 +3,7 @@ from typing import assert_never
 from pydantic import BaseModel
 
 from examples.reference_runtime.invoice import InvoiceExtractor
-from examples.reference_runtime.llm import OpenRouterClient
+from examples.reference_runtime.llm import LLMClient
 from examples.reference_runtime.planner.schemas import Plan
 from examples.reference_runtime.retriever.retriever import (
     DocumentRetriever,
@@ -12,7 +12,7 @@ from examples.reference_runtime.retriever.retriever import (
 )
 from examples.reference_runtime.retriever.schemas import RetrieverResult
 from examples.reference_runtime.schemas import InvoiceExtraction, LLMResponse
-from sentinelai import observe
+from sentinelai import span
 
 
 class ExecutionResult(BaseModel):
@@ -24,7 +24,7 @@ class ExecutionResult(BaseModel):
 class Executor:
     def __init__(
         self,
-        client: OpenRouterClient,
+        client: LLMClient,
         invoice_extractor: InvoiceExtractor | None = None,
         retriever: DocumentRetriever | None = None,
     ) -> None:
@@ -32,14 +32,7 @@ class Executor:
         self._invoice_extractor = invoice_extractor or InvoiceExtractor(client)
         self._retriever = retriever
 
-    @observe(
-        "executor",
-        capture={
-            "response": "output",
-            "retrieval_result": "retrieval_result",
-        },
-        prompt_keys="executor.{intent}",
-    )
+    @span("executor")
     async def execute(
         self,
         plan: Plan,

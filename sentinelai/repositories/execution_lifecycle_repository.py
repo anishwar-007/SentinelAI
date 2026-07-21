@@ -4,7 +4,7 @@ import builtins
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from sentinelai.contracts import ExecutionRecord
+from sentinelai.contracts.execution import ExecutionRecord
 
 __all__ = [
     "ExecutionLifecycleRepository",

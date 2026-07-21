@@ -1,8 +1,8 @@
 # SentinelAI
 
-SentinelAI is an AI Execution Intelligence system with three package
-boundaries: a dependency-light SDK, an optional Platform backend, and a
-reference runtime that behaves like a customer application.
+SentinelAI is an AI observability platform with four independent products:
+the language-neutral Execution Protocol, the Python SDK, the optional Platform,
+and customer runtimes.
 
 ## Install
 
@@ -20,26 +20,25 @@ uv sync --extra reference --extra dev
 ## Minimal instrumentation
 
 ```python
-from sentinelai import configure, observe, observe_execution
-from sentinelai.contracts import ModelInfo
+from sentinelai import Contracts, configure, execution, span
 from sentinelai.execution_stream import InMemoryExecutionStream
 
 configure(
     publisher=InMemoryExecutionStream(),
-    model_info=ModelInfo(provider="acme", model_name="demo"),
+    model_info=Contracts.ModelInfo(provider="acme", model_name="demo"),
 )
 
-@observe("my_stage", capture="response")
+@span("my_stage")
 async def run_stage(query: str) -> dict[str, str]:
     return {"answer": "ok"}
 
-@observe_execution(execution_name="query")
+@execution("query")
 async def main(query: str) -> dict[str, str]:
     return await run_stage(query)
 ```
 
-Customer code describes what happened. The SDK owns execution lifecycle,
-tracing, snapshot assembly, and execution-stream publication.
+Customer code writes business logic and annotates boundaries. The SDK owns
+execution lifecycle, tracing, event publication, and stage inference.
 
 Use the optional Platform to project those facts into persistence:
 
@@ -56,24 +55,19 @@ the reference runtime.
 
 ## Public API
 
-Primary convenience exports from `sentinelai`:
+Frozen exports from `sentinelai`:
 
+- `Sentinel`
 - `configure`
-- `observe_execution`
-- `observe`
-- `ExecutionMetadata`
-- `ObservedResult`
-- `ExecutionSnapshot`
-- `ExecutionStream` / `InMemoryExecutionStream`
+- `execution`
+- `span`
+- `ExecutionStream`
+- `Contracts`
+- `Plugin`
+- ambient correlation getters
 
-`ExecutionContext` and repository protocols remain importable for this major
-version as compatibility surfaces. New integrations should not use them.
-
-See [docs/public-api.md](docs/public-api.md) and
-[docs/architecture.md](docs/architecture.md).
-
-Contracts are available from `sentinelai.contracts`; stream APIs are under
-`sentinelai.execution_stream`; plugin authors target `sentinelai.plugins.Plugin`.
+See [docs/public-api.md](docs/public-api.md), [docs/architecture.md](docs/architecture.md),
+and [protocol/README.md](protocol/README.md).
 
 Replay, evaluation, analytics, and dashboard namespaces are reserved under
 `sentinelai_platform`; no engines or dashboard are implemented yet.
