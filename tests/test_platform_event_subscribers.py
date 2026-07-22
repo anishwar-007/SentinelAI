@@ -68,8 +68,26 @@ class MemorySnapshotRepository:
         *,
         limit: int = 100,
         offset: int = 0,
+        status: str | None = None,
+        execution_name: str | None = None,
+        model: str | None = None,
+        from_time: object | None = None,
+        to_time: object | None = None,
     ) -> list[ExecutionSummary]:
+        del status, execution_name, model, from_time, to_time
         return []
+
+    async def count(
+        self,
+        *,
+        status: str | None = None,
+        execution_name: str | None = None,
+        model: str | None = None,
+        from_time: object | None = None,
+        to_time: object | None = None,
+    ) -> int:
+        del status, execution_name, model, from_time, to_time
+        return 0
 
     async def find_by_trace(self, trace_id: UUID) -> ExecutionSnapshot | None:
         return next(

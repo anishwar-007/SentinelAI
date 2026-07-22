@@ -77,6 +77,25 @@ from sentinelai_platform.repositories import (
 )
 ```
 
+## Dashboard HTTP APIs
+
+Protected (Bearer Supabase JWT via `require_user`):
+
+- `GET /api/v1/executions`
+- `GET /api/v1/executions/{id}`
+- `GET /api/v1/executions/{id}/trace`
+
+Public:
+
+- `GET /health`
+- `POST /api/v1/demo/query` (rate-limited; input ≤ 500; sandbox by default;
+  reference runtime injects the real orchestrator pipeline)
+- `GET /api/v1/demo/executions/{id}` and `.../trace` (sandbox metadata only)
+
+Auth env: `SUPABASE_URL`, `SUPABASE_JWT_SECRET`. Local bypass only:
+`SENTINELAI_AUTH_DISABLED=1` when no JWT secret is set. CORS via
+`SENTINELAI_DASHBOARD_ORIGINS` (allows `Authorization`).
+
 ## Internal implementation
 
 Do not depend on:

@@ -65,6 +65,12 @@ class ExecutionSnapshot(BaseModel):
 
 
 class ExecutionSummary(BaseModel):
+    """Lightweight list projection for explorers and dashboards.
+
+    ``created_at`` is the execution start time. Optional fields are filled when
+    the Platform can project them efficiently (lifecycle join / snapshot metadata).
+    """
+
     model_config = ConfigDict(frozen=True)
 
     execution_id: UUID
@@ -75,6 +81,9 @@ class ExecutionSummary(BaseModel):
     execution_status: TerminalExecutionStatus
     repository_version: str
     created_at: datetime
+    execution_name: str | None = None
+    latency_ms: float | None = None
+    completed_at: datetime | None = None
 
 
 class ExecutionRecord(BaseModel):

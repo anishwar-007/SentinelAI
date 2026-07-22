@@ -62,7 +62,18 @@ class _MemorySnapshots:
     async def load(self, execution_id: UUID) -> ExecutionSnapshot | None:
         return self.snapshots.get(execution_id)
 
-    async def list(self, *, limit: int = 100, offset: int = 0) -> list[ExecutionSummary]:
+    async def list(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        status: str | None = None,
+        execution_name: str | None = None,
+        model: str | None = None,
+        from_time: object | None = None,
+        to_time: object | None = None,
+    ) -> list[ExecutionSummary]:
+        del status, execution_name, model, from_time, to_time
         values = list(self.snapshots.values())[offset : offset + limit]
         return [
             ExecutionSummary(
@@ -74,9 +85,26 @@ class _MemorySnapshots:
                 execution_status=item.execution_status,
                 repository_version=item.repository_version,
                 created_at=item.created_at,
+                execution_name=(
+                    item.metadata.get("execution_name")
+                    if isinstance(item.metadata.get("execution_name"), str)
+                    else None
+                ),
             )
             for item in values
         ]
+
+    async def count(
+        self,
+        *,
+        status: str | None = None,
+        execution_name: str | None = None,
+        model: str | None = None,
+        from_time: object | None = None,
+        to_time: object | None = None,
+    ) -> int:
+        del status, execution_name, model, from_time, to_time
+        return len(self.snapshots)
 
 
 class _MemoryTracePersister:

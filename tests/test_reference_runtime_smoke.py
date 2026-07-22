@@ -33,6 +33,9 @@ def test_reference_runtime_modules_import() -> None:
         "/executions",
         "/executions/{execution_id}",
         "/trace/{trace_id}",
+        "/api/v1/executions",
+        "/api/v1/executions/{execution_id}",
+        "/api/v1/executions/{execution_id}/trace",
     } <= paths
 
 

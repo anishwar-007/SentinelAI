@@ -1,37 +1,18 @@
+"""Legacy unversioned Platform read routes (kept for compatibility).
+
+Prefer the versioned Dashboard APIs under ``/api/v1``.
+"""
+
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Request
 
 from sentinelai.contracts import ExecutionSnapshot, ExecutionSummary
-from sentinelai_platform.execution_store.trace_persister import TracePersister
-from sentinelai_platform.repositories.execution import ExecutionSnapshotRepository
+from sentinelai_platform.api.deps import get_execution_repository, get_trace_persister
+from sentinelai_platform.api.errors import ExecutionNotFoundError, TraceNotFoundError
 
 router = APIRouter()
-
-
-class ExecutionNotFoundError(LookupError):
-    pass
-
-
-class TraceNotFoundError(LookupError):
-    pass
-
-
-def get_execution_repository(request: Request) -> ExecutionSnapshotRepository:
-    repository = getattr(request.app.state, "execution_repository", None)
-    if repository is None:
-        raise RuntimeError(
-            "ExecutionSnapshotRepository is not configured on app.state."
-        )
-    return repository  # type: ignore[no-any-return]
-
-
-def get_trace_persister(request: Request) -> TracePersister:
-    persister = getattr(request.app.state, "trace_persister", None)
-    if persister is None:
-        raise RuntimeError("TracePersister is not configured on app.state.")
-    return persister  # type: ignore[no-any-return]
 
 
 @router.get("/health")
@@ -57,7 +38,7 @@ async def get_execution(
     repository = get_execution_repository(request)
     snapshot = await repository.load(execution_id)
     if snapshot is None:
-        raise ExecutionNotFoundError(f"Execution snapshot not found: {execution_id}")
+        raise ExecutionNotFoundError(f"Execution not found: {execution_id}")
     return snapshot
 
 

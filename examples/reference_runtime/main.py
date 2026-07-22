@@ -3,10 +3,12 @@ import inspect
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from examples.reference_runtime.analysis.analyzer import RootCauseAnalyzer
 from examples.reference_runtime.analysis.prompts import root_cause_analysis_prompt
+from examples.reference_runtime.api.demo_runner import build_demo_query_runner
 from examples.reference_runtime.api.errors import register_exception_handlers
 from examples.reference_runtime.api.router import router as runtime_router
 from examples.reference_runtime.config import load_settings
@@ -32,7 +34,16 @@ from examples.reference_runtime.verifier.verifier import Verifier
 from sentinelai import Contracts, configure
 from sentinelai.execution_stream import InMemoryExecutionStream
 from sentinelai_platform.api import (
+    configure_cors,
+)
+from sentinelai_platform.api import (
+    demo_router as platform_demo_router,
+)
+from sentinelai_platform.api import (
     register_exception_handlers as register_platform_exception_handlers,
+)
+from sentinelai_platform.api import (
+    v1_router as platform_v1_router,
 )
 from sentinelai_platform.api.router import router as platform_router
 from sentinelai_platform.event_subscribers import register_persistence_subscribers
@@ -48,6 +59,7 @@ from sentinelai_platform.ports.storage import StorageProvider
 from sentinelai_platform.storage.local_provider import LocalStorageProvider
 from sentinelai_platform.storage.supabase_provider import SupabaseStorageProvider
 
+load_dotenv()
 
 def _prompt_reference(
     *,
@@ -184,9 +196,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.client = client
     app.state.retriever = retriever
     app.state.orchestrator = orchestrator
+    app.state.demo_query_runner = build_demo_query_runner(
+        orchestrator,
+        trace_persister=trace_persister,
+    )
     app.state.execution_repository = execution_snapshot_repository
     app.state.execution_stream = execution_stream
     app.state.trace_persister = trace_persister
+    app.state.trace_repository = trace_repository
     app.state.storage = storage
     app.state.vector_store = vector_store
 
@@ -206,5 +223,8 @@ app = FastAPI(
 
 register_exception_handlers(app)
 register_platform_exception_handlers(app)
+configure_cors(app)
 app.include_router(runtime_router)
 app.include_router(platform_router)
+app.include_router(platform_v1_router)
+app.include_router(platform_demo_router)

@@ -49,6 +49,11 @@ def test_api_adapter_requires_fastapi_extra() -> None:
     assert "/query" not in paths
     assert "/documents" not in paths
 
+    v1_paths = _route_paths(module.v1_router.routes)
+    assert "/api/v1/executions" in v1_paths
+    assert "/api/v1/executions/{execution_id}" in v1_paths
+    assert "/api/v1/executions/{execution_id}/trace" in v1_paths
+
 
 def test_plugin_protocol_is_documented_extension_point() -> None:
     module = importlib.import_module("sentinelai.plugins")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 from abc import ABC, abstractmethod
+from datetime import datetime
 from uuid import UUID
 
 from sentinelai.contracts import ExecutionSnapshot, ExecutionSummary
@@ -29,7 +30,24 @@ class ExecutionSnapshotRepository(ABC):
         *,
         limit: int = 100,
         offset: int = 0,
+        status: str | None = None,
+        execution_name: str | None = None,
+        model: str | None = None,
+        from_time: datetime | None = None,
+        to_time: datetime | None = None,
     ) -> builtins.list[ExecutionSummary]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def count(
+        self,
+        *,
+        status: str | None = None,
+        execution_name: str | None = None,
+        model: str | None = None,
+        from_time: datetime | None = None,
+        to_time: datetime | None = None,
+    ) -> int:
         raise NotImplementedError
 
     @abstractmethod

@@ -67,6 +67,27 @@ class PostgresTraceRepository(TraceRepository):
                 created_at=row.created_at,
             )
 
+    async def find_by_execution_id(self, execution_id: UUID) -> TraceRecord | None:
+        async with self._session_factory() as session:
+            result = await session.scalars(
+                select(TraceModel)
+                .where(TraceModel.execution_id == execution_id)
+                .order_by(TraceModel.created_at.desc())
+                .limit(1)
+            )
+            row = result.first()
+            if row is None:
+                return None
+            return TraceRecord(
+                trace_id=row.trace_id,
+                execution_id=row.execution_id,
+                status=row.status,
+                span_count=row.span_count,
+                latency_ms=row.latency_ms,
+                storage_path=row.storage_path,
+                created_at=row.created_at,
+            )
+
     async def list_spans(self, trace_id: UUID) -> list[SpanRecord]:
         async with self._session_factory() as session:
             result = await session.scalars(
