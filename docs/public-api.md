@@ -92,8 +92,9 @@ Public:
   reference runtime injects the real orchestrator pipeline)
 - `GET /api/v1/demo/executions/{id}` and `.../trace` (sandbox metadata only)
 
-Auth env: `SUPABASE_URL`, `SUPABASE_JWT_SECRET`. Local bypass only:
-`SENTINELAI_AUTH_DISABLED=1` when no JWT secret is set. CORS via
+Auth env: `SUPABASE_URL` (required for JWKS / ES256 signing keys), optional
+`SUPABASE_JWT_SECRET` (Legacy HS256 only). Local bypass only:
+`SENTINELAI_AUTH_DISABLED=1` when neither is set. CORS via
 `SENTINELAI_DASHBOARD_ORIGINS` (allows `Authorization`).
 
 ## Internal implementation
