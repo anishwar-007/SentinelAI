@@ -48,6 +48,7 @@ def test_protected_route_accepts_valid_supabase_hs256_token(
         {
             "sub": "user-123",
             "role": "authenticated",
+            "aud": "authenticated",
             "iss": issuer,
             "exp": datetime.now(UTC) + timedelta(minutes=5),
         },

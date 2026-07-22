@@ -44,7 +44,10 @@ def require_user(request: Request) -> dict[str, Any]:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    decode_kwargs: dict[str, Any] = {"algorithms": ["HS256"]}
+    decode_kwargs: dict[str, Any] = {
+        "algorithms": ["HS256"],
+        "audience": "authenticated",
+    }
     issuer = _supabase_issuer()
     if issuer is not None:
         decode_kwargs["issuer"] = issuer
